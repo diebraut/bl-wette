@@ -1,0 +1,139 @@
+@charset "utf-8";
+td, button {font-family:arial;font-size:12px;color:#003300;line-height:18px}
+th {font-family:arial;font-size:8pt;color:#242424;}
+a{font-family:arial;font-size:8pt;color:#242424;text-decoration:underline;}
+input,select,button,textarea {font-family:arial;font-size:8pt;color:#242424;}
+.klein {font-family:arial;font-size:10px;color:#003300;line-height:14px}
+.kleinweiss {font-family:arial;font-size:11px;color:#ffffff;background-color:#496241;}
+.big {font-family:arial;font-size:12pt;color:#6c6c6c;}
+
+
+
+
+.footer1
+{
+	 background-color:#8A9A81;
+}
+
+.footer2
+{
+	 background-color:#CCCCCC;
+}
+
+
+body
+{
+ background-color:white;
+ background-image:url(./pic/sw_h.gif);
+ background-repeat:repeat-y;
+ padding:0px;
+ margin:0px;
+}
+
+.menuout
+{
+	font-family:arial;
+	font-size:11px;
+	color:#FFFFFF;
+	background-color:gray;
+}
+
+.head
+{
+	font-family:arial;
+	font-size:11px;
+	color:#ffffff;
+	background-color:#496241;
+}
+
+.title
+{
+	color:white;
+	border:1px solid white;
+	background-color:#8A9A81;
+}
+
+.tablestyle
+{
+	border: gray solid 1px;
+	padding: 0px;
+	border-spacing: 0px;
+}
+
+.firstline
+{
+	background-color:whitesmoke;
+}
+
+.secondline
+{
+	background-color:gainsboro;
+}
+.failedline
+{
+	background-color:red;
+}
+.firstcolumn
+{
+	background-color:white;
+}
+
+.secondcolumn
+{
+	background-color:Yellow;
+}
+
+.error
+{
+	 color:white;
+	 border:1px solid white;
+	 background-color:#db1e1e;
+}
+
+/*
+	spezielle styles für das menü
+*/
+.menufirstline
+{
+	background-color:whitesmoke;
+}
+
+.menusecondline
+{
+	background-color:gainsboro;
+}
+
+.ttable
+{
+	background-color:#d4e6cb;
+}
+/*
+	mini BL Table
+*/
+.minitable
+{
+	border: gray solid 1px;
+	padding: 0px;
+	border-spacing: 0px;
+	background-color:#f5f5f5;
+}
+/*
+	hier sind die styles für die statistiken
+*/
+.stathead
+{
+	border-bottom:2px solid gray;
+}
+
+.statdata
+{
+	background-color:#f5f5f5;
+}
+
+/*
+	style für die toptenliste
+*/
+.topten
+{
+	background-color:#eeeeee;
+}
