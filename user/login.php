@@ -1,7 +1,7 @@
 ﻿<?php
 header('Content-type: text/html; charset=utf-8');
 ?>
-<html>
+<html lang="de">
    <head>
     <html lang="de">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8"> 
@@ -75,15 +75,10 @@ header('Content-type: text/html; charset=utf-8');
 		mysqli_query($db,"SET NAMES utf8");
 
 
-        $actDay = $_GET['actDay'];
-        if(!isset($actDay))
-                $actDay = $_POST['actDay'];
+		$actDay = $_GET['actDay'] ?? ($_POST['actDay'] ?? null);
+		$action = $_GET['action'] ?? ($_POST['action'] ?? null);
         
-        $action = $_GET['action'];
-        if(!isset($action))
-                $action = $_POST['action'];
-        
-        $menuuser = $_POST['user'];
+        $menuuser = $_POST['user'] ?? '';
         $user = $menuuser;
         $session = $menuuser;
         $closetime = "";
@@ -107,7 +102,13 @@ header('Content-type: text/html; charset=utf-8');
             
             setlocale(LC_TIME, "de_DE.UTF-8");                
             
-            $closetime = strftime('Tippabgabe bis %A den %d %B um %H:%M Uhr möglich!',strtotime($closeDate));
+			if (class_exists('IntlDateFormatter')) {
+				$fmt = new IntlDateFormatter('de_DE', IntlDateFormatter::FULL, IntlDateFormatter::SHORT, date_default_timezone_get(), null, "EEEE 'den' d. MMMM 'um' HH:mm 'Uhr'");
+				$closetime = 'Tippabgabe bis ' . $fmt->format(strtotime($closeDate)) . ' möglich!';
+			} else {
+				// Fallback ohne Monats-/Wochentagsnamen
+				$closetime = 'Tippabgabe bis ' . date('d.m.Y \u\m H:i \U\h\r', strtotime($closeDate)) . ' möglich!';
+			}
             
             $statusSpielTag = 0;
             if(mysqli_num_rows($res)!=0)
@@ -123,9 +124,7 @@ header('Content-type: text/html; charset=utf-8');
                     $statusSpielTag = 1;
             }
             if ( $action == "wetten" ) {
-               $day = $_GET['day'];
-               if(!isset($day))
-                  $day = $_POST['day'];
+			   $day = $_GET['day'] ?? ($_POST['day'] ?? null);
                if (isset($day)) {
                	  $actDay = $day;
                }
@@ -222,8 +221,10 @@ header('Content-type: text/html; charset=utf-8');
                                                         <tr>
                                                                 <?php
                                                                         $SQL="SELECT *,IF(intVerein1=$team1, 'H', 'A' ) as ort, IF(intVerein1=$team1, IF(intGoal1>intGoal2,2,IF(intGoal1=intGoal2,1,0)),IF(intGoal1<intGoal2,2,IF(intGoal1=intGoal2,1,0))) AS Stat FROM tblspieltag WHERE intTag>=$actDay-5 and intTag<$actDay and (intVerein1=$team1 OR intVerein2=$team1) and intStatus=2";
-                                                                        $res = mysqli_query($db, $SQL);
-                                                                        echo mysqli_error();
+																		$res = mysqli_query($db, $SQL);
+																		if ($res === false) {
+																			echo mysqli_error($db); // oder: error_log(mysqli_error($db));
+																		}
                                                                         $cnt = mysqli_num_rows($res);
                                                                 ?>
                                                                 <td colspan="3" align="right">
@@ -633,7 +634,7 @@ header('Content-type: text/html; charset=utf-8');
                                                 else
                                                         $SQL = "UPDATE tblwette SET intGoal1=$user_goal1, intGoal2=$user_goal2 WHERE intSpielid=$gameid and intUserid=$user_id";
                                                 mysqli_query($db, $SQL);
-                                                if(mysqli_error()!= "")
+                                                if(mysqli_error($db)!= "")
                                                         $error++;
                                         }
                                 }
