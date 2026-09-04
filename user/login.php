@@ -1,10 +1,10 @@
-﻿<?php
+<?php
 header('Content-type: text/html; charset=utf-8');
 ?>
 <html lang="de">
    <head>
     <html lang="de">
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8"> 
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"> 
                 <link rel="stylesheet" type="text/css" href="../common/style.css"/>
                 <link rel="stylesheet" type="text/css" href="style.css"/>
                 <script language="javascript" src="md5.js"></script>
@@ -634,7 +634,7 @@ header('Content-type: text/html; charset=utf-8');
                                                 else
                                                         $SQL = "UPDATE tblwette SET intGoal1=$user_goal1, intGoal2=$user_goal2 WHERE intSpielid=$gameid and intUserid=$user_id";
                                                 mysqli_query($db, $SQL);
-                                                if(mysqli_error($db)!= "")
+                                                if(mysqli_error($db) != "")
                                                         $error++;
                                         }
                                 }

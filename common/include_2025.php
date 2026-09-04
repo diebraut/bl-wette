@@ -6,7 +6,7 @@ date_default_timezone_set("Europe/Berlin");
 
 define('CONST_NUMBER_OF_MATCH_DAYS','34'); 
 define('CONST_LIGA','bl1'); 
-define('CONST_LIGA_SEASON','2026'); 
+define('CONST_LIGA_SEASON','2025'); 
 
 define ('DB_NAME','bl_wette');
 define ('HOST','localhost');
@@ -177,15 +177,15 @@ class bl_season {
                        array('87' ,'3'),   // Borussia Mönchengladbach
                        array('175','14'),  // Hoffenheim                       
                        array('80','8'),    // 1. FC Union Berlin
-                       array('198','2'),    // Elversberg                 
+                       array('98','2'),    // Pauli                   
                        array('134','17'),  // Werder Bremen
-                       array('31','65'),  // Paderborn                       
+                       array('131','65'),  // Wolfsburg                       
                        array('7' ,'7'),    // Borussia Dortmund
                        array('6','10'),    // Bayer Leverkusen                       
                        array('16' ,'6'),   // VFB Stuttgart
                        array('1635','18'), // RB Leipzig                      
                        array('65','16'),  // Köln
-                       array('9','9'));  // 1 FCSchalke
+                       array('199','9'));  // 1 FC Heidenheim 1846 
  
     static function lookupVereinsID ( $idOpenDB )
     {

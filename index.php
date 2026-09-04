@@ -1,3 +1,7 @@
+<?php
+header('Location: /user/login.php', true, 302);
+exit;
+?>
 <!DOCTYPE html>
 <html lang="de">
 <head>
