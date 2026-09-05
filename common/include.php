@@ -8,10 +8,15 @@ define('CONST_NUMBER_OF_MATCH_DAYS','34');
 define('CONST_LIGA','bl1'); 
 define('CONST_LIGA_SEASON','2026'); 
 
-define ('DB_NAME','bl_wette');
-define ('HOST','localhost');
-define ('DB_USER','root');
-define ('DB_PASSWD','castell');
+$localConfigFile = __DIR__ . '/config.local.php';
+$localConfig = is_file($localConfigFile) ? require $localConfigFile : array();
+
+define ('DB_NAME', isset($localConfig['db_name']) ? $localConfig['db_name'] : 'bl_wette');
+define ('HOST', isset($localConfig['host']) ? $localConfig['host'] : 'localhost');
+define ('DB_USER', isset($localConfig['db_user']) ? $localConfig['db_user'] : 'root');
+define ('DB_PASSWD', isset($localConfig['db_password']) ? $localConfig['db_password'] : 'castell');
+define ('CONST_PER_MATCH_DEADLINE', !empty($localConfig['per_match_deadline']));
+define ('CONST_LOCAL_PERSISTENT_LOGIN', !empty($localConfig['persistent_login']));
 
 $dbname=DB_NAME;
 $address=HOST;
@@ -265,10 +270,34 @@ class bl_season {
         $id2 = self::lookupVereinsID ($item->idTeam2);
                 
         $query = "INSERT INTO ";
-        $query.= "tblspieltag (intVerein1,intVerein2,intGoal1,intGoal2,intTag,intStatus,intMatchIdFromOpenLigaDB) ";
-        $query.= "Values ($id1,$id2,0,0,$item->groupOrderID,0,$item->matchID) ";
+        if (CONST_PER_MATCH_DEADLINE) {
+          $matchStart = date('Y-m-d H:i:s', strtotime($item->matchDateTime));
+          $query.= "tblspieltag (intVerein1,intVerein2,intGoal1,intGoal2,intTag,intStatus,intMatchIdFromOpenLigaDB,dtmStart) ";
+          $query.= "Values ($id1,$id2,0,0,$item->groupOrderID,0,$item->matchID,'$matchStart') ";
+        } else {
+          $query.= "tblspieltag (intVerein1,intVerein2,intGoal1,intGoal2,intTag,intStatus,intMatchIdFromOpenLigaDB) ";
+          $query.= "Values ($id1,$id2,0,0,$item->groupOrderID,0,$item->matchID) ";
+        }
         $result = mysqli_query($db,$query);          
       }        
+   }
+
+   /* Aktualisiert lokal die Anstosszeiten aller Spiele aus OpenLigaDB. */
+   function refreshMatchStartTimes () {
+      if (!CONST_PER_MATCH_DEADLINE || self::$isOpenDBAvailable == 0) {
+         RETURN;
+      }
+
+      $db = mysqli_connect(HOST, DB_USER, DB_PASSWD, DB_NAME);
+      self::$db_liga_params->leagueShortcut = CONST_LIGA;
+      self::$db_liga_params->leagueSaison = CONST_LIGA_SEASON;
+      $response = self::callSoapFct('GetMatchdataByLeagueSaison', self::$db_liga_client, self::$db_liga_params);
+
+      foreach ($response->GetMatchdataByLeagueSaisonResult->Matchdata as $item) {
+         $matchStart = date('Y-m-d H:i:s', strtotime($item->matchDateTime));
+         $matchId = (int)$item->matchID;
+         mysqli_query($db, "UPDATE tblspieltag SET dtmStart='$matchStart' WHERE intMatchIdFromOpenLigaDB=$matchId");
+      }
    }
 
    function restoreResults ( ) 

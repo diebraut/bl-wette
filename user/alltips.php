@@ -1,6 +1,18 @@
 <?php
 header('Content-type: text/html; charset=utf-8');
 
+$localSessionConfig = __DIR__ . '/../common/config.local.php';
+if (is_file($localSessionConfig)) {
+   $localSessionOptions = require $localSessionConfig;
+   if (!empty($localSessionOptions['persistent_login'])) {
+      $localSessionLifetime = isset($localSessionOptions['session_timeout_seconds']) ? max(60, (int)$localSessionOptions['session_timeout_seconds']) : 1800;
+      ini_set('session.gc_maxlifetime', $localSessionLifetime);
+      session_set_cookie_params($localSessionLifetime, '/');
+      session_start();
+      setcookie(session_name(), session_id(), time() + $localSessionLifetime, '/');
+   }
+}
+
 if(!isset($_POST))
         $_POST  = $HTTP_POST_VARS;
 if(!isset($_GET))
@@ -10,22 +22,34 @@ require("../common/include.php");
 $db=mysqli_connect("$address", "$dbuser", "$dbpasswd",'bl_wette');
 mysqli_query($db,"SET NAMES utf8");
 
-$user = $_GET['user'];
-$day  = $_GET['day'];
+$user = $_GET['user'] ?? (CONST_LOCAL_PERSISTENT_LOGIN && isset($_SESSION['bl_wette_user']) ? $_SESSION['bl_wette_user'] : '');
+$day  = isset($_GET['day']) ? (int)$_GET['day'] : 0;
   
-$sqlRes = mysqli_query($db, "SELECT intStatus FROM tblspieltag WHERE intTag=$day");
-$status = mysql_result($sqlRes, 0, "intStatus");
-
 $call_allowed = 0;
-if (($status >= 1) OR ($user == "roland"))
+$visibleGames = "";
+if (CONST_PER_MATCH_DEADLINE)
 {
-   $call_allowed = 1;
-      
+   $startedGames = mysqli_query($db, "SELECT lngIndex FROM tblspieltag WHERE intTag=$day AND (intStatus>=1 OR dtmStart <= NOW())");
+   $call_allowed = (mysqli_num_rows($startedGames) > 0 || $user == "roland") ? 1 : 0;
+   if ($user != "roland")
+   {
+      $visibleGames = " AND (s.intStatus>=1 OR s.dtmStart <= NOW())";
+   }
+}
+else
+{
+   $sqlRes = mysqli_query($db, "SELECT intStatus FROM tblspieltag WHERE intTag=$day");
+   $status = mysql_result($sqlRes, 0, "intStatus");
+   $call_allowed = (($status >= 1) OR ($user == "roland")) ? 1 : 0;
+}
+
+if ($call_allowed == 1)
+{
    $SQL = "SELECT v1.strName as Team1, v2.strName as Team2, s.lngIndex as SpielId ".
                         "from tblspieltag as s ".
                    "LEFT JOIN tblverein as v1 ON (v1.lngIndex=s.intVerein1)".
                         "LEFT JOIN tblverein as v2 ON (v2.lngIndex=s.intVerein2)".
-                        " WHERE  s.intTag=$day ".
+                        " WHERE  s.intTag=$day $visibleGames ".
                         " GROUP BY s.lngIndex ORDER BY s.lngIndex DESC";
    
    $result = mysqli_query($db, $SQL);

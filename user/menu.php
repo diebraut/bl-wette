@@ -38,7 +38,7 @@
 		<td align="center" width="100" class="menuout" style="cursor:pointer" onclick="submitaction('table')" onmouseover="showDays(false);style.background='#496241';style.color='white'" onmouseout="style.background='gray';style.color=''"><strong>Ranking</strong></td>
 		<td align="center" width="100" class="menuout" style="cursor:pointer" onclick="showDays(true,this)" onmouseover="style.background='#496241';style.color='white'" onmouseout="style.background='gray';style.color=''"><strong>Spieltage</strong></td>
 		<td align="center" width="110" class="menuout" style="cursor:pointer" onclick="submitaction('useroffice')" onmouseover="showDays(false);style.background='#496241';style.color='white'" onmouseout="style.background='gray';style.color=''"><strong>Mein Account</strong></td>
-		<td align="center" width="110" class="menuout" style="cursor:pointer" onclick="self.location.href='./login.php'" onmouseover="showDays(false);style.background='#496241';style.color='white'" onmouseout="style.background='gray';style.color=''"><strong>Logout</strong></td>
+		<td align="center" width="110" class="menuout" style="cursor:pointer" onclick="self.location.href='./login.php?action=logout'" onmouseover="showDays(false);style.background='#496241';style.color='white'" onmouseout="style.background='gray';style.color=''"><strong>Logout</strong></td>
 	</tr>
 	<tr>
 		<td><img src="pic/shim.gif" width="1" height="1" alt="" border="0"></td>

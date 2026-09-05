@@ -1,5 +1,17 @@
 <?php
 header('Content-type: text/html; charset=utf-8');
+
+$localSessionConfig = __DIR__ . '/../common/config.local.php';
+if (is_file($localSessionConfig)) {
+        $localSessionOptions = require $localSessionConfig;
+        if (!empty($localSessionOptions['persistent_login'])) {
+                $localSessionLifetime = isset($localSessionOptions['session_timeout_seconds']) ? max(60, (int)$localSessionOptions['session_timeout_seconds']) : 1800;
+                ini_set('session.gc_maxlifetime', $localSessionLifetime);
+                session_set_cookie_params($localSessionLifetime, '/');
+                session_start();
+                setcookie(session_name(), session_id(), time() + $localSessionLifetime, '/');
+        }
+}
 ?>
 <html lang="de">
    <head>
@@ -71,17 +83,36 @@ header('Content-type: text/html; charset=utf-8');
         
         include_once ("../common/include.php");
 
-        $db=mysqli_connect("$address", $dbuser,$dbpasswd,'bl_wette');
+		$db=mysqli_connect("$address", $dbuser,$dbpasswd,'bl_wette');
 		mysqli_query($db,"SET NAMES utf8");
+
+        if (CONST_PER_MATCH_DEADLINE) {
+                $season = new bl_season();
+                $season->refreshMatchStartTimes();
+        }
 
 
 		$actDay = $_GET['actDay'] ?? ($_POST['actDay'] ?? null);
 		$action = $_GET['action'] ?? ($_POST['action'] ?? null);
         
         $menuuser = $_POST['user'] ?? '';
+        if (CONST_LOCAL_PERSISTENT_LOGIN && $menuuser === '' && isset($_SESSION['bl_wette_user'])) {
+                $menuuser = $_SESSION['bl_wette_user'];
+        }
         $user = $menuuser;
         $session = $menuuser;
         $closetime = "";
+
+        if (CONST_LOCAL_PERSISTENT_LOGIN && $action === 'logout') {
+                $_SESSION = array();
+                session_destroy();
+                $menuuser = '';
+                $user = '';
+                $session = '';
+                $action = null;
+        } elseif (CONST_LOCAL_PERSISTENT_LOGIN && $action === null && $menuuser !== '') {
+                $action = 'help';
+        }
  
         $currentDate = date_create_from_format('Y-m-d H:i:s', date('Y-m-d H:i:s'));        
 
@@ -102,7 +133,9 @@ header('Content-type: text/html; charset=utf-8');
             
             setlocale(LC_TIME, "de_DE.UTF-8");                
             
-			if (class_exists('IntlDateFormatter')) {
+			if (CONST_PER_MATCH_DEADLINE) {
+				$closetime = 'Tippabgabe für jede Paarung bis zum jeweiligen Anpfiff möglich!';
+			} elseif (class_exists('IntlDateFormatter')) {
 				$fmt = new IntlDateFormatter('de_DE', IntlDateFormatter::FULL, IntlDateFormatter::SHORT, date_default_timezone_get(), null, "EEEE 'den' d. MMMM 'um' HH:mm 'Uhr'");
 				$closetime = 'Tippabgabe bis ' . $fmt->format(strtotime($closeDate)) . ' möglich!';
 			} else {
@@ -118,7 +151,12 @@ header('Content-type: text/html; charset=utf-8');
                     mysqli_query($db, "insert into tblinfo (intDay) Values(1)");
                     $actDay = 1;
             }
-            if(date_format($currentDate,'Y-m-d H:i:s') > $closeDate )
+            if (CONST_PER_MATCH_DEADLINE)
+            {
+                    mysqli_query($db, "UPDATE tblspieltag SET intStatus=1 WHERE intStatus=0 AND intTag=$actDay AND dtmStart <= NOW()");
+                    $statusSpielTag = mysqli_num_rows(mysqli_query($db, "SELECT lngIndex FROM tblspieltag WHERE intTag=$actDay AND intStatus<>0")) > 0 ? 1 : 0;
+            }
+            elseif(date_format($currentDate,'Y-m-d H:i:s') > $closeDate )
             {
                     mysqli_query($db, "UPDATE tblspieltag SET intStatus=1 WHERE intStatus=0 AND intTag=$actDay");
                     $statusSpielTag = 1;
@@ -408,6 +446,9 @@ header('Content-type: text/html; charset=utf-8');
                                 mysqli_query($db,"insert into tblsession(strSessionid, intUser) values('$session', $user)");
                                 $user = $session;
                                 $menuuser = $session;
+                                if (CONST_LOCAL_PERSISTENT_LOGIN) {
+                                        $_SESSION['bl_wette_user'] = $session;
+                                }
                                 $action = "help";
                         }
                         else
@@ -616,7 +657,9 @@ header('Content-type: text/html; charset=utf-8');
                         }
                         if($user_id != "")
                         {
-                                $SQL = "SELECT * FROM tblspieltag WHERE intStatus=0";
+                                $SQL = CONST_PER_MATCH_DEADLINE
+                                        ? "SELECT * FROM tblspieltag WHERE intStatus=0 AND intTag=$actDay AND dtmStart > NOW()"
+                                        : "SELECT * FROM tblspieltag WHERE intStatus=0";
                                 $result = mysqli_query($db, $SQL);
                                 for($i = 0; $i < mysqli_num_rows($result); $i++)
                                 {
@@ -703,8 +746,18 @@ header('Content-type: text/html; charset=utf-8');
                 if($action == "list")
                 {
                         include("menu.php");
-                        $result = mysqli_query($db, "select * from tblspieltag where intTag=$actDay");
+                        $matchOrder = CONST_PER_MATCH_DEADLINE ? " ORDER BY dtmStart DESC, lngIndex DESC" : "";
+                        $result = mysqli_query($db, "select * from tblspieltag where intTag=$actDay$matchOrder");
                         $anzahl = mysqli_num_rows($result)-1;
+                        $matchStartCounts = array();
+                        if (CONST_PER_MATCH_DEADLINE)
+                        {
+                                $groupResult = mysqli_query($db, "SELECT dtmStart, COUNT(*) AS gameCount FROM tblspieltag WHERE intTag=$actDay GROUP BY dtmStart");
+                                while ($group = mysqli_fetch_assoc($groupResult))
+                                {
+                                        $matchStartCounts[$group['dtmStart']] = (int)$group['gameCount'];
+                                }
+                        }
                         if($user == "")
                                 $user = $_GET['user'];
                         if($user == "")
@@ -746,12 +799,28 @@ header('Content-type: text/html; charset=utf-8');
                         </table>
                         <table border="0" cellspacing="0" cellpadding="0" class="tablestyle" width="360">
                         <?php
+                        $lastMatchStart = null;
+                        $weekdays = array('Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag');
                         while($anzahl > -1)
                         {
                                 $id = mysql_result($result, $anzahl, "lngIndex");
                                 $verx1 = mysql_result($result, $anzahl, "intVerein1");
                                 $verx2 = mysql_result($result, $anzahl, "intVerein2");
                                 $status = mysql_result($result, $anzahl, "intStatus");
+                                $matchStart = mysql_result($result, $anzahl, "dtmStart");
+
+                                if (CONST_PER_MATCH_DEADLINE && $matchStart != $lastMatchStart)
+                                {
+                                        $matchDate = date_create_from_format('Y-m-d H:i:s', $matchStart);
+                                        $matchDateLabel = $weekdays[(int)date_format($matchDate, 'w')] . date_format($matchDate, ', d.m.Y \\u\\m H:i \\U\\h\\r');
+                                        $matchGroupText = $matchStartCounts[$matchStart] === 1 ? 'Spiel am ' : 'Alle Spiele am ';
+                                        ?>
+                                        <tr>
+                                                <td colspan="7" style="background-color:#ffffff; padding:3px 4px;"><div style="background:linear-gradient(#ffffff, #f1f3f0); color:#202820; font-size:12px; font-weight:bold; letter-spacing:0.15px; line-height:18px; padding:3px 8px; border:1px solid #aeb8aa; border-radius:2px; box-shadow:inset 0 1px 0 #ffffff, 0 2px 3px rgba(58,72,55,0.25); text-align:left;"><?php echo $matchGroupText . $matchDateLabel?></div></td>
+                                        </tr>
+                                        <?php
+                                        $lastMatchStart = $matchStart;
+                                }
                                 
                                 $scnd = mysqli_query($db, "select * from tblverein where lngIndex=$verx1");
                                 $ver1 = mysql_result($scnd, 0, "strName");
@@ -780,7 +849,7 @@ header('Content-type: text/html; charset=utf-8');
                                         }
                                                 
                                         {
-                                                if($status != 0)
+                                                if($status != 0 || (CONST_PER_MATCH_DEADLINE && $matchStart <= date('Y-m-d H:i:s')))
                                                         $stat = "disabled";
                                                 else
                                                         $stat = "";
@@ -788,8 +857,8 @@ header('Content-type: text/html; charset=utf-8');
                                                 $classname = "secondline";
                                                 if($anzahl % 2)
                                                         $classname = "firstline";?>
-                                                <tr class="<?php echo $classname?>" onclick="setHigh(<?php echo $verx1?>,<?php echo $verx2?>)">
-                                                        <td align="right" width="130" class="<?php echo $classname?>"><?php echo $ver1?>&nbsp;</td>
+                                                <tr class="<?php echo $classname?>" style="height:23px;" onclick="setHigh(<?php echo $verx1?>,<?php echo $verx2?>)">
+                                                        <td align="right" width="130" class="<?php echo $classname?>" style="white-space:nowrap; font-size:11px; vertical-align:middle;"><?php echo $ver1?>&nbsp;</td>
                                                         <td width="25" align="center" class="<?php echo $classname?>">
                                                                 <?php 
                                                                 if($stat == "")
@@ -815,8 +884,8 @@ header('Content-type: text/html; charset=utf-8');
                                                                         <?php echo $goal2?>
                                                                 <?php
                                                                 } ?>
-                                                        </td><td align="left" width="130" class="<?php echo $classname?>">&nbsp;<?php echo $ver2?></td>
-                                                        <td align="center" width="20" class="<?php echo $classname?>"><a href="javascript:openStat(<?php echo $verx1?>, <?php echo $verx2?>)"><img src="pic/info.gif" width="16" height="16" alt="INFORMATIONEN" border="0"></a></td>
+                                                        </td><td align="left" width="130" class="<?php echo $classname?>" style="white-space:nowrap; font-size:11px; vertical-align:middle;">&nbsp;<?php echo $ver2?></td>
+                                                        <td align="center" width="20" class="<?php echo $classname?>"><a href="javascript:openStat(<?php echo $verx1?>, <?php echo $verx2?>)" tabindex="-1"><img src="pic/info.gif" width="16" height="16" alt="INFORMATIONEN" border="0"></a></td>
                                                         <td align="center" width="20" class="<?php echo $classname?>">&nbsp;</td>
                                                 </tr>
                                                 <?php
@@ -827,9 +896,9 @@ header('Content-type: text/html; charset=utf-8');
                         $last = $actDay - 1;
                         ?>
                         </table>
-                        <table cellpadding="0" cellspacing="0" border="0" width="360" height="30">
+                        <table cellpadding="0" cellspacing="0" border="0" width="360" height="60">
                                 <tr>
-                                        <td align="right" height="30"><img src="pic/tippdrucken.gif" width="120" height="20" alt="" border="0" onclick="window.print()" style="cursor:pointer">&nbsp;<img src="./pic/tippen.gif" border="0" onclick="document.xform.submit()" style="cursor:pointer"></td>
+                                        <td align="right" height="60"><img src="pic/tippdrucken.gif" width="120" height="20" alt="" border="0" onclick="window.print()" style="cursor:pointer">&nbsp;<img src="./pic/tippen.gif" border="0" onclick="document.xform.submit()" style="cursor:pointer"></td>
                                 </tr>
                                 <tr>
                                         <td align="right" height="30"><img src="pic/alletipps.gif" width="120" height="20" alt="" border="0" <?php if ($statusSpielTag == 1) { ?> onclick="openall( <?php echo $actDay ?> )" <?php } ?>  style="cursor:pointer"></td>
