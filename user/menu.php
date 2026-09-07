@@ -1,4 +1,5 @@
 <script>
+	<?php if (!empty($localPersistentLogin)) { ?>
 	(function () {
 		var timeout = <?php echo isset($localSessionLifetime) ? (int)$localSessionLifetime * 1000 : 1800000; ?>;
 		var timer;
@@ -25,6 +26,7 @@
 		});
 		resetTimer();
 	}());
+	<?php } ?>
 
 	function submitaction(act, day)
 	{
