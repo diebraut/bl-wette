@@ -282,24 +282,6 @@ class bl_season {
       }        
    }
 
-   /* Aktualisiert lokal die Anstosszeiten aller Spiele aus OpenLigaDB. */
-   function refreshMatchStartTimes () {
-      if (!CONST_PER_MATCH_DEADLINE || self::$isOpenDBAvailable == 0) {
-         RETURN;
-      }
-
-      $db = mysqli_connect(HOST, DB_USER, DB_PASSWD, DB_NAME);
-      self::$db_liga_params->leagueShortcut = CONST_LIGA;
-      self::$db_liga_params->leagueSaison = CONST_LIGA_SEASON;
-      $response = self::callSoapFct('GetMatchdataByLeagueSaison', self::$db_liga_client, self::$db_liga_params);
-
-      foreach ($response->GetMatchdataByLeagueSaisonResult->Matchdata as $item) {
-         $matchStart = date('Y-m-d H:i:s', strtotime($item->matchDateTime));
-         $matchId = (int)$item->matchID;
-         mysqli_query($db, "UPDATE tblspieltag SET dtmStart='$matchStart' WHERE intMatchIdFromOpenLigaDB=$matchId");
-      }
-   }
-
    function restoreResults ( ) 
    {
 	  $db = mysqli_connect(HOST, DB_USER,DB_PASSWD,DB_NAME); 
@@ -416,8 +398,13 @@ class bl_season {
          $dtLastMatchDate  = "1900-01-01T00:00:00"; 
 
          //ermittung des Datum/Zeit vom ersten und letzten Spieles des Spieltages            
- 	     foreach ($response->GetMatchdataByGroupLeagueSaisonResult as $matches){
+	     foreach ($response->GetMatchdataByGroupLeagueSaisonResult as $matches){
 	        foreach ($matches as $match)  {
+				if (CONST_PER_MATCH_DEADLINE) {
+					$matchId = (int)$match->matchID;
+					$matchStart = date('Y-m-d H:i:s', strtotime($match->matchDateTime));
+					mysqli_query($db, "UPDATE tblspieltag SET dtmStart='$matchStart' WHERE intMatchIdFromOpenLigaDB=$matchId");
+				}
                 //echo "\n match=". $match->matchID . " finished=" . $match->matchIsFinished;
                 //if ($currentDay == $currentGroupId && $match->matchIsFinished === TRUE) echo "\n match=". $match->matchID . " finished ";
 				if ($currentDay != $currentGroupId || ($currentDay == $currentGroupId && $match->matchIsFinished)) { 

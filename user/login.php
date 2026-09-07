@@ -127,12 +127,6 @@ if (is_file($localSessionConfig)) {
 		$db=mysqli_connect("$address", $dbuser,$dbpasswd,'bl_wette');
 		mysqli_query($db,"SET NAMES utf8");
 
-        if (CONST_PER_MATCH_DEADLINE) {
-                $season = new bl_season();
-                $season->refreshMatchStartTimes();
-        }
-
-
 		$actDay = $_GET['actDay'] ?? ($_POST['actDay'] ?? null);
 		$action = $_GET['action'] ?? ($_POST['action'] ?? null);
         
