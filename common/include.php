@@ -400,12 +400,9 @@ class bl_season {
                                        self::$db_liga_client,
                                        self::$db_liga_params);
       $currentGroupId = $response->GetCurrentGroupResult->groupOrderID;
-      echo "\currentDay = " . $currentDay;
       $xy = $currentGroupId;
       do 
       {              
-         echo "currentGroupId = " . $currentGroupId;
-         
          self::$db_liga_params->groupOrderID   = $currentGroupId;
          self::$db_liga_params->leagueShortcut = CONST_LIGA;
          self::$db_liga_params->leagueSaison   = CONST_LIGA_SEASON;

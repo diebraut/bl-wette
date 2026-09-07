@@ -1,15 +1,56 @@
 <?php
+ob_start();
 header('Content-type: text/html; charset=utf-8');
 
 $localSessionConfig = __DIR__ . '/../common/config.local.php';
+$localPersistentLogin = false;
+$localSessionLifetime = 1800;
 if (is_file($localSessionConfig)) {
         $localSessionOptions = require $localSessionConfig;
         if (!empty($localSessionOptions['persistent_login'])) {
+                $localPersistentLogin = true;
                 $localSessionLifetime = isset($localSessionOptions['session_timeout_seconds']) ? max(60, (int)$localSessionOptions['session_timeout_seconds']) : 1800;
                 ini_set('session.gc_maxlifetime', $localSessionLifetime);
                 session_set_cookie_params($localSessionLifetime, '/');
                 session_start();
                 setcookie(session_name(), session_id(), time() + $localSessionLifetime, '/');
+
+                $requestedAction = $_GET['action'] ?? ($_POST['action'] ?? '');
+                $postedUser = $_POST['user'] ?? '';
+                $sessionUser = $_SESSION['bl_wette_user'] ?? '';
+                $lastActivity = (int)($_SESSION['bl_wette_last_activity'] ?? 0);
+                $sessionExpired = $lastActivity > 0 && (time() - $lastActivity) >= $localSessionLifetime;
+                $invalidPostedSession = $postedUser !== ''
+                    && $requestedAction !== 'login'
+                    && ($sessionUser === '' || !hash_equals($sessionUser, $postedUser));
+
+                if ($sessionExpired || $invalidPostedSession) {
+                        $_SESSION = array();
+                        session_destroy();
+                        ob_end_clean();
+                        header('Location: login.php?timeout=1', true, 303);
+                        exit;
+                }
+
+                if ($requestedAction === 'keepalive') {
+                        if ($sessionUser !== '') {
+                                $_SESSION['bl_wette_last_activity'] = time();
+                                setcookie(session_name(), session_id(), time() + $localSessionLifetime, '/');
+                        }
+                        http_response_code($sessionUser !== '' ? 204 : 401);
+                        exit;
+                }
+
+                $protectedActions = array('help', 'list', 'table', 'bltable', 'useroffice', 'wetten', 'saveuser');
+                if ($sessionUser === '' && in_array($requestedAction, $protectedActions, true)) {
+                        ob_end_clean();
+                        header('Location: login.php?timeout=1', true, 303);
+                        exit;
+                }
+
+                if ($sessionUser !== '') {
+                        $_SESSION['bl_wette_last_activity'] = time();
+                }
         }
 }
 ?>
@@ -113,7 +154,29 @@ if (is_file($localSessionConfig)) {
         } elseif (CONST_LOCAL_PERSISTENT_LOGIN && $action === null && $menuuser !== '') {
                 $action = 'help';
         }
- 
+
+        // Navigation is intentionally redirected to GET.  This keeps POST data
+        // out of browser history and prevents ERR_CACHE_MISS after a restart.
+        $navigationActions = array('', 'help', 'list', 'table', 'bltable', 'useroffice');
+        if ($localPersistentLogin
+            && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST'
+            && in_array((string)$action, $navigationActions, true)) {
+                $target = 'login.php';
+                $query = array();
+                if ($action !== '') {
+                        $query['action'] = $action;
+                }
+                if ($actDay !== null && $actDay !== '') {
+                        $query['actDay'] = $actDay;
+                }
+                if (!empty($query)) {
+                        $target .= '?' . http_build_query($query);
+                }
+                ob_end_clean();
+                header('Location: ' . $target, true, 303);
+                exit;
+        }
+
         $currentDate = date_create_from_format('Y-m-d H:i:s', date('Y-m-d H:i:s'));        
 
         if(isset($actDay) && $actDay != "")
@@ -448,6 +511,10 @@ if (is_file($localSessionConfig)) {
                                 $menuuser = $session;
                                 if (CONST_LOCAL_PERSISTENT_LOGIN) {
                                         $_SESSION['bl_wette_user'] = $session;
+                                        $_SESSION['bl_wette_last_activity'] = time();
+                                        ob_end_clean();
+                                        header('Location: login.php', true, 303);
+                                        exit;
                                 }
                                 $action = "help";
                         }
@@ -686,6 +753,14 @@ if (is_file($localSessionConfig)) {
                         {
                                 $msg = "Ihre Tipps wurden erfolgreich gespeichert!";
                         }
+
+                        if ($localPersistentLogin) {
+                                $_SESSION['bl_wette_flash_message'] = $msg;
+                                $target = 'login.php?action=list&actDay=' . rawurlencode((string)$actDay);
+                                ob_end_clean();
+                                header('Location: ' . $target, true, 303);
+                                exit;
+                        }
                         
                         if($action != null)
                         {
@@ -745,6 +820,10 @@ if (is_file($localSessionConfig)) {
                 
                 if($action == "list")
                 {
+                        if (CONST_LOCAL_PERSISTENT_LOGIN && isset($_SESSION['bl_wette_flash_message'])) {
+                                $msg = $_SESSION['bl_wette_flash_message'];
+                                unset($_SESSION['bl_wette_flash_message']);
+                        }
                         include("menu.php");
                         $matchOrder = CONST_PER_MATCH_DEADLINE ? " ORDER BY dtmStart DESC, lngIndex DESC" : "";
                         $result = mysqli_query($db, "select * from tblspieltag where intTag=$actDay$matchOrder");

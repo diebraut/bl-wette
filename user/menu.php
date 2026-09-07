@@ -1,4 +1,31 @@
 <script>
+	(function () {
+		var timeout = <?php echo isset($localSessionLifetime) ? (int)$localSessionLifetime * 1000 : 1800000; ?>;
+		var timer;
+		var lastKeepalive = 0;
+		var redirectToLogin = function () {
+			window.location.replace('login.php?action=logout&timeout=1');
+		};
+		var keepAlive = function () {
+			var now = Date.now();
+			if (now - lastKeepalive < 60000) {
+				return;
+			}
+			lastKeepalive = now;
+			var beacon = new Image();
+			beacon.src = 'login.php?action=keepalive&_=' + now;
+		};
+		var resetTimer = function () {
+			window.clearTimeout(timer);
+			timer = window.setTimeout(redirectToLogin, timeout);
+			keepAlive();
+		};
+		['click', 'keydown', 'input', 'touchstart', 'mousemove'].forEach(function (eventName) {
+			window.addEventListener(eventName, resetTimer, { passive: true });
+		});
+		resetTimer();
+	}());
+
 	function submitaction(act, day)
 	{
 		document.menuform.action.value=act
