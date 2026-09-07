@@ -227,6 +227,7 @@ CREATE TABLE `tblspieltag` (
   `intStatus` int(11) NOT NULL DEFAULT 0,
   `strSpielbericht` varchar(99) DEFAULT NULL,
   `intMatchIdFromOpenLigaDB` int(11) DEFAULT NULL,
+  `dtmStart` datetime DEFAULT NULL,
   PRIMARY KEY (`lngIndex`)
 ) ENGINE=MyISAM AUTO_INCREMENT=307 DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
