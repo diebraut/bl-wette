@@ -22,7 +22,8 @@ if (is_file($localSessionConfig)) {
                 $sessionExpired = $lastActivity > 0 && (time() - $lastActivity) >= $localSessionLifetime;
                 $invalidPostedSession = $postedUser !== ''
                     && $requestedAction !== 'login'
-                    && ($sessionUser === '' || !hash_equals($sessionUser, $postedUser));
+                    && $sessionUser !== ''
+                    && !hash_equals($sessionUser, $postedUser);
 
                 if ($sessionExpired || $invalidPostedSession) {
                         $_SESSION = array();
@@ -42,7 +43,7 @@ if (is_file($localSessionConfig)) {
                 }
 
                 $protectedActions = array('help', 'list', 'table', 'bltable', 'useroffice', 'wetten', 'saveuser');
-                if ($sessionUser === '' && in_array($requestedAction, $protectedActions, true)) {
+                if ($sessionUser === '' && $postedUser === '' && in_array($requestedAction, $protectedActions, true)) {
                         ob_end_clean();
                         header('Location: login.php?timeout=1', true, 303);
                         exit;
@@ -131,6 +132,19 @@ if (is_file($localSessionConfig)) {
 		$action = $_GET['action'] ?? ($_POST['action'] ?? null);
         
         $menuuser = $_POST['user'] ?? '';
+        if ($localPersistentLogin && $sessionUser === '' && $menuuser !== '' && $action !== 'login') {
+                $legacySession = mysqli_real_escape_string($db, $menuuser);
+                $legacySessionResult = mysqli_query($db, "SELECT 1 FROM tblsession WHERE strSessionid='$legacySession' LIMIT 1");
+                if (mysqli_num_rows($legacySessionResult) === 1) {
+                        $_SESSION['bl_wette_user'] = $menuuser;
+                        $_SESSION['bl_wette_last_activity'] = time();
+                        $sessionUser = $menuuser;
+                } else {
+                        ob_end_clean();
+                        header('Location: login.php?timeout=1', true, 303);
+                        exit;
+                }
+        }
         if (CONST_LOCAL_PERSISTENT_LOGIN && $menuuser === '' && isset($_SESSION['bl_wette_user'])) {
                 $menuuser = $_SESSION['bl_wette_user'];
         }
