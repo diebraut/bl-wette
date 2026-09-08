@@ -10,48 +10,6 @@ if (is_file($localSessionConfig)) {
         if (!empty($localSessionOptions['persistent_login'])) {
                 $localPersistentLogin = true;
                 $localSessionLifetime = isset($localSessionOptions['session_timeout_seconds']) ? max(60, (int)$localSessionOptions['session_timeout_seconds']) : 1800;
-                ini_set('session.gc_maxlifetime', $localSessionLifetime);
-                session_set_cookie_params($localSessionLifetime, '/');
-                session_start();
-                setcookie(session_name(), session_id(), time() + $localSessionLifetime, '/');
-
-                $requestedAction = $_GET['action'] ?? ($_POST['action'] ?? '');
-                $postedUser = $_POST['user'] ?? '';
-                $sessionUser = $_SESSION['bl_wette_user'] ?? '';
-                $lastActivity = (int)($_SESSION['bl_wette_last_activity'] ?? 0);
-                $sessionExpired = $lastActivity > 0 && (time() - $lastActivity) >= $localSessionLifetime;
-                $invalidPostedSession = $postedUser !== ''
-                    && $requestedAction !== 'login'
-                    && $sessionUser !== ''
-                    && !hash_equals($sessionUser, $postedUser);
-
-                if ($sessionExpired || $invalidPostedSession) {
-                        $_SESSION = array();
-                        session_destroy();
-                        ob_end_clean();
-                        header('Location: login.php?timeout=1', true, 303);
-                        exit;
-                }
-
-                if ($requestedAction === 'keepalive') {
-                        if ($sessionUser !== '') {
-                                $_SESSION['bl_wette_last_activity'] = time();
-                                setcookie(session_name(), session_id(), time() + $localSessionLifetime, '/');
-                        }
-                        http_response_code($sessionUser !== '' ? 204 : 401);
-                        exit;
-                }
-
-                $protectedActions = array('help', 'list', 'table', 'bltable', 'useroffice', 'wetten', 'saveuser');
-                if ($sessionUser === '' && $postedUser === '' && in_array($requestedAction, $protectedActions, true)) {
-                        ob_end_clean();
-                        header('Location: login.php?timeout=1', true, 303);
-                        exit;
-                }
-
-                if ($sessionUser !== '') {
-                        $_SESSION['bl_wette_last_activity'] = time();
-                }
         }
 }
 ?>
@@ -132,57 +90,19 @@ if (is_file($localSessionConfig)) {
 		$action = $_GET['action'] ?? ($_POST['action'] ?? null);
         
         $menuuser = $_POST['user'] ?? '';
-        if ($localPersistentLogin && $sessionUser === '' && $menuuser !== '' && $action !== 'login') {
-                $legacySession = mysqli_real_escape_string($db, $menuuser);
-                $legacySessionResult = mysqli_query($db, "SELECT 1 FROM tblsession WHERE strSessionid='$legacySession' LIMIT 1");
-                if (mysqli_num_rows($legacySessionResult) === 1) {
-                        $_SESSION['bl_wette_user'] = $menuuser;
-                        $_SESSION['bl_wette_last_activity'] = time();
-                        $sessionUser = $menuuser;
-                } else {
-                        ob_end_clean();
-                        header('Location: login.php?timeout=1', true, 303);
-                        exit;
-                }
-        }
-        if (CONST_LOCAL_PERSISTENT_LOGIN && $menuuser === '' && isset($_SESSION['bl_wette_user'])) {
-                $menuuser = $_SESSION['bl_wette_user'];
-        }
         $user = $menuuser;
         $session = $menuuser;
         $closetime = "";
 
-        if (CONST_LOCAL_PERSISTENT_LOGIN && $action === 'logout') {
-                $_SESSION = array();
-                session_destroy();
+        if ($action === 'logout') {
+                if ($menuuser !== '') {
+                        $logoutSession = mysqli_real_escape_string($db, $menuuser);
+                        mysqli_query($db, "DELETE FROM tblsession WHERE strSessionid='$logoutSession'");
+                }
                 $menuuser = '';
                 $user = '';
                 $session = '';
                 $action = null;
-        } elseif (CONST_LOCAL_PERSISTENT_LOGIN && $action === null && $menuuser !== '') {
-                $action = 'help';
-        }
-
-        // Navigation is intentionally redirected to GET.  This keeps POST data
-        // out of browser history and prevents ERR_CACHE_MISS after a restart.
-        $navigationActions = array('', 'help', 'list', 'table', 'bltable', 'useroffice');
-        if ($localPersistentLogin
-            && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST'
-            && in_array((string)$action, $navigationActions, true)) {
-                $target = 'login.php';
-                $query = array();
-                if ($action !== '') {
-                        $query['action'] = $action;
-                }
-                if ($actDay !== null && $actDay !== '') {
-                        $query['actDay'] = $actDay;
-                }
-                if (!empty($query)) {
-                        $target .= '?' . http_build_query($query);
-                }
-                ob_end_clean();
-                header('Location: ' . $target, true, 303);
-                exit;
         }
 
         $currentDate = date_create_from_format('Y-m-d H:i:s', date('Y-m-d H:i:s'));        
@@ -517,13 +437,6 @@ if (is_file($localSessionConfig)) {
                                 mysqli_query($db,"insert into tblsession(strSessionid, intUser) values('$session', $user)");
                                 $user = $session;
                                 $menuuser = $session;
-                                if (CONST_LOCAL_PERSISTENT_LOGIN) {
-                                        $_SESSION['bl_wette_user'] = $session;
-                                        $_SESSION['bl_wette_last_activity'] = time();
-                                        ob_end_clean();
-                                        header('Location: login.php', true, 303);
-                                        exit;
-                                }
                                 $action = "help";
                         }
                         else
@@ -762,14 +675,6 @@ if (is_file($localSessionConfig)) {
                                 $msg = "Ihre Tipps wurden erfolgreich gespeichert!";
                         }
 
-                        if ($localPersistentLogin) {
-                                $_SESSION['bl_wette_flash_message'] = $msg;
-                                $target = 'login.php?action=list&actDay=' . rawurlencode((string)$actDay);
-                                ob_end_clean();
-                                header('Location: ' . $target, true, 303);
-                                exit;
-                        }
-                        
                         if($action != null)
                         {
                                 if($_POST['day'] != "")
@@ -1054,13 +959,13 @@ if (is_file($localSessionConfig)) {
                                                 <tr>
                                                         <td><strong>Login</strong></td>
                                                 </tr>
-                                                <form action='login.php' name="login" autocomplete="off"  method="post">
-                                                <input type="hidden" name="action" value="login">
+                                                <form action='login.php' id="login" name="login" autocomplete="off" method="post">
+                                                <input type="hidden" name="action" value="login" form="login">
                                                 <tr><td>Alias:</td></tr>
-                                                <tr><td width="150"><input type="text" name="user" style="width:150"></td></tr>
+                                                <tr><td width="150"><input type="text" name="user" style="width:150" form="login"></td></tr>
                                                 <tr><td>Passwort:</td></tr>
-                                                <tr><td width="150"><input type="password" name="xx" style="width:150"></td></tr>
-                                                <tr><td align="right"><input type="image" src="pic/login.gif">&nbsp;<tr><td>
+                                                <tr><td width="150"><input type="password" name="xx" style="width:150" form="login"></td></tr>
+                                                <tr><td align="right"><input type="image" src="pic/login.gif" form="login">&nbsp;<tr><td>
                                                 <tr><td><img src="pic/shim.gif" width="1" height="10" alt="" border="0"></td></tr>
 												<!--
                                                 <tr><td height="15"><img src="pic/registrieren.gif" onMouseover="this.style.cursor='pointer'" onclick="javascript:document.location.href='login.php?action=register'" border="0">
