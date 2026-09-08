@@ -4,13 +4,11 @@
 	if(!isset($_GET))
 		$_GET  = $HTTP_GET_VARS;
 	
-	$action = $_POST['action'];
+	$action = $_POST['action'] ?? '';
 	include_once ("../common/include.php");
-	$user = $_GET['user'];
-	if(!isset($user))
-		$user = $_POST['user'];
+	$user = $_GET['user'] ?? ($_POST['user'] ?? ($menuuser ?? ''));
 	
-	$value = $_GET['value'];
+	$value = $_GET['value'] ?? '';
 	$session = $user;
 	$res = mysqli_query($db, "select * from tblsession where strSessionid='$session'");
 	
@@ -23,7 +21,7 @@
         	GROUP BY g.lngIndex";
 	
 	$maxcnt = mysqli_num_rows(mysqli_query($db, $getcount));
-	$pstart = $_POST['xpage'];
+	$pstart = $_POST['xpage'] ?? null;
 	if(!isset($pstart))
 		$pstart = 1;
 		

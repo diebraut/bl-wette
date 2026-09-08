@@ -4,9 +4,7 @@
 	if(!isset($_GET))
 		$_GET  = $HTTP_GET_VARS;
 	include_once("../common/include.php");
-	$user = $_GET['user'];
-	if(!isset($user))
-		$user = $_POST['user'];
+	$user = $_GET['user'] ?? ($_POST['user'] ?? ($menuuser ?? ''));
 		
 	if(isset($user))
 	{
@@ -19,7 +17,7 @@
 			$user=-1;
 	}
 	
-	$pstart = $_POST['xpage'];
+	$pstart = $_POST['xpage'] ?? null;
 	if(!isset($pstart))
 		$pstart = 1;
 		
