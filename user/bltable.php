@@ -19,7 +19,7 @@
 					<td width="40" class="head"><b>Punkte</b></td>
 				</tr>
 				<?php
-					$result = mysqli_query($db,"SELECT *, cast(`intGoal` AS SIGNED) - cast(`intGGoal` AS SIGNED) AS Dif FROM tblverein ORDER BY intPoint DESC, Dif DESC ");
+					$result = mysqli_query($db,"SELECT *, cast(`intGoal` AS SIGNED) - cast(`intGGoal` AS SIGNED) AS Dif FROM tblverein ORDER BY intPoint DESC, Dif DESC, lngIndex ASC ");
 					$anzahl = mysqli_num_rows($result)-1;
 					for($i=0;$i<=$anzahl;$i++)
 					{
@@ -74,12 +74,12 @@
 	$SQLHeim = "SELECT v.*,(cast(v.intGoal as signed) - cast(v.intGGoal as signed)) AS Dif, SUM(IF(intStatus=2,IF(intGoal1>intGoal2,3,IF(intGoal1=intGoal2,1,0)),0)) as Point, SUM(intGoal1-intGoal2) as dif, SUM(intGoal1) as tore, SUM(intGoal2) as gtore FROM tblverein as v
   LEFT JOIN tblspieltag as s ON s.intVerein1=v.lngIndex
 GROUP BY v.lngindex
-ORDER BY Point DESC, DIF DESC, intGoal DESC";
+ORDER BY Point DESC, DIF DESC, intGoal DESC, v.lngIndex ASC";
 
 $SQLGast = "SELECT v.*,(cast(v.intGoal as signed) - cast(v.intGGoal as signed)) AS Dif, SUM(IF(intStatus=2,IF(intGoal1<intGoal2,3,IF(intGoal1=intGoal2,1,0)),0)) as Point, SUM(intGoal2-intGoal1) as dif, SUM(intGoal2) as tore, SUM(intGoal1) as gtore FROM tblverein as v
   LEFT JOIN tblspieltag as s ON s.intVerein2=v.lngIndex
 GROUP BY v.lngindex
-ORDER BY Point DESC,Dif DESC, intGoal DESC";
+ORDER BY Point DESC,Dif DESC, intGoal DESC, v.lngIndex ASC";
 ?>
 	<tr>
 		<td><strong>Heimtabelle</strong></td>

@@ -144,7 +144,8 @@ if (is_file($localSessionConfig)) {
             }
             if (CONST_PER_MATCH_DEADLINE)
             {
-                    mysqli_query($db, "UPDATE tblspieltag SET intStatus=1 WHERE intStatus=0 AND intTag=$actDay AND dtmStart <= NOW()");
+                    $matchNow = date('Y-m-d H:i:s'); // Same Berlin time as dtmStart and the form's deadline check.
+                    mysqli_query($db, "UPDATE tblspieltag SET intStatus=1 WHERE intStatus=0 AND intTag=$actDay AND dtmStart <= '$matchNow'");
                     $statusSpielTag = mysqli_num_rows(mysqli_query($db, "SELECT lngIndex FROM tblspieltag WHERE intTag=$actDay AND intStatus<>0")) > 0 ? 1 : 0;
             }
             elseif(date_format($currentDate,'Y-m-d H:i:s') > $closeDate )
@@ -164,7 +165,7 @@ if (is_file($localSessionConfig)) {
 
         $x = mysql_result($res, 0, "cDate");
  
-        if ( (date_format($currentDate,'Y-m-d H:i:s') > $dtmEndOfMatchDay) AND ($action == "login")) 
+        if ( empty($localConfig['automatic_match_updates']) && (date_format($currentDate,'Y-m-d H:i:s') > $dtmEndOfMatchDay) AND ($action == "login"))
         {
 	    $newSeason = new bl_season();
             $newActDay = $newSeason->switchToNextSpieltag($actDay);            
@@ -646,7 +647,7 @@ if (is_file($localSessionConfig)) {
                         if($user_id != "")
                         {
                                 $SQL = CONST_PER_MATCH_DEADLINE
-                                        ? "SELECT * FROM tblspieltag WHERE intStatus=0 AND intTag=$actDay AND dtmStart > NOW()"
+                                        ? "SELECT * FROM tblspieltag WHERE intStatus=0 AND intTag=$actDay AND dtmStart > '" . date('Y-m-d H:i:s') . "'"
                                         : "SELECT * FROM tblspieltag WHERE intStatus=0";
                                 $result = mysqli_query($db, $SQL);
                                 for($i = 0; $i < mysqli_num_rows($result); $i++)
@@ -900,7 +901,7 @@ if (is_file($localSessionConfig)) {
                 </td>
                 <!--- SBE<td width="10"><img src="../../../pic/shim.gif" style="border:0px solid gray" width="10" height="100%" alt="" border="0"></td>--->
                 <td width="150" valign="top" rowspan="3">
-                                <table cellpadding="2" cellspacing="0" border="0" class="minitable" width="200">
+                                <table data-live-sidebar cellpadding="2" cellspacing="0" border="0" class="minitable" width="200">
                                         <tr>
                                                 <td class="head">&nbsp;</td>
                                                 <td width="100" class="head"><b>Verein</b></td>

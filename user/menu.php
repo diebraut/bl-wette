@@ -1,3 +1,9 @@
+<?php if (!empty($liveFragment)) return; ?>
+<script>
+window.blLiveConfig = <?php echo json_encode(['user' => $menuuser, 'view' => in_array($action ?? '', ['table','bltable','list','help'], true) ? $action : 'day', 'day' => (int)($actDay ?? 1), 'currentDay' => (int)mysqli_fetch_row(mysqli_query($db, 'SELECT intDay FROM tblinfo LIMIT 1'))[0]], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+</script>
+<script src="live.js" defer></script>
+<div id="live-status" hidden></div>
 <script>
 	<?php if (!empty($localPersistentLogin)) { ?>
 	(function () {

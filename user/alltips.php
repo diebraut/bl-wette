@@ -29,11 +29,13 @@ $call_allowed = 0;
 $visibleGames = "";
 if (CONST_PER_MATCH_DEADLINE)
 {
-   $startedGames = mysqli_query($db, "SELECT lngIndex FROM tblspieltag WHERE intTag=$day AND (intStatus>=1 OR dtmStart <= NOW())");
+   // dtmStart contains Berlin local time, independently of the database timezone.
+   $matchNow = date('Y-m-d H:i:s');
+   $startedGames = mysqli_query($db, "SELECT lngIndex FROM tblspieltag WHERE intTag=$day AND (intStatus>=1 OR dtmStart <= '$matchNow')");
    $call_allowed = (mysqli_num_rows($startedGames) > 0 || $user == "roland") ? 1 : 0;
    if ($user != "roland")
    {
-      $visibleGames = " AND (s.intStatus>=1 OR s.dtmStart <= NOW())";
+      $visibleGames = " AND (s.intStatus>=1 OR s.dtmStart <= '$matchNow')";
    }
 }
 else

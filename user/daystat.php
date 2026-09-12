@@ -93,7 +93,7 @@ $diff = $pointtendenz + $pointdif;
                           "        S.`intTag`    = $actDay     AND ".
                           "        W.`intTag`    = $actDay ".
                           "GROUP BY W.intUserID ".        
-                          "ORDER BY POINTS DESC ";
+                          "ORDER BY POINTS DESC, USERID ASC ";
                 
 		
 		if(mysqli_num_rows($res)>0)
