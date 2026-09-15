@@ -5,13 +5,18 @@
 Ohne diese Einstellung bleibt der bisherige Login-Ablauf aktiv.
 
 Lokal läuft die Windows-Aufgabe **BL-Wette lokale Spielauswertung** alle fünf
-Minuten mit `K:\xampp\php\php.exe`. Rechner und MySQL müssen laufen; der Task
-läuft im eingerichteten Benutzerkontext. Kein Browser und kein Login erforderlich.
+Minuten über `wscript.exe` und `bin/update_matches_local.vbs` ohne Konsolenfenster.
+Der lokale Wrapper startet `K:\xampp\php\php.exe` nur, wenn Apache und MySQL
+aus `K:\xampp` laufen. Sonst endet die Prüfung ohne Auswertung erfolgreich.
+Der Task läuft im eingerichteten Benutzerkontext. Kein Browser und kein Login erforderlich.
 Protokoll: `bl-wette-match-update.log` im PHP-Verzeichnis `sys_get_temp_dir()`.
 
-- Ab 105 Minuten nach dem gespeicherten Anpfiff: offene Begegnungen des
-  betreffenden Spieltags bei OpenLigaDB prüfen (ein Aufruf je Spieltag).
-- Nur `matchIsFinished=true` mit gültigem Endergebnis (`resultTypeID=2`) werten.
+- Den aktuellen und den nächsten Spieltag bei jedem Lauf prüfen; dadurch werden
+  auch nachträglich geänderte Anstoßtermine von OpenLigaDB übernommen.
+- Ab dem aktuell gemeldeten Anstoß eine Begegnung als laufend markieren und den
+  Zwischenstand aus der OpenLigaDB-Torfolge bzw. dem aktuellen Ergebnis speichern.
+- Nur `matchIsFinished=true` mit gültigem Endergebnis (`resultTypeID=2`) beenden
+  und für die dauerhaften Vereins- und Tipperpunkte werten.
 - Vereins- und Tipperpunkte neu summieren; Tipps und Geldbeträge nicht ändern.
 - Nach allen neun ausgewerteten Begegnungen auf den nächsten Spieltag wechseln.
   Verschobene/abgebrochene oder unvollständig gemeldete Spiele verhindern dies.

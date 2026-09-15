@@ -42,30 +42,73 @@ class MatchUpdate
         return null;
     }
 
-    private function refreshDay($day, $evaluate)
+    private static function currentScore($match)
+    {
+        $score = null;
+        foreach ($match['goals'] ?? [] as $goal) {
+            $a = $goal['scoreTeam1'] ?? null;
+            $b = $goal['scoreTeam2'] ?? null;
+            if (is_int($a) && is_int($b) && $a >= 0 && $b >= 0) $score = [$a, $b];
+        }
+        if ($score !== null) return $score;
+        foreach ($match['matchResults'] ?? [] as $result) {
+            if ((int)($result['resultTypeID'] ?? 0) !== 2) continue;
+            $a = $result['pointsTeam1'] ?? null;
+            $b = $result['pointsTeam2'] ?? null;
+            if (is_int($a) && is_int($b) && $a >= 0 && $b >= 0) $score = [$a, $b];
+        }
+        return $score ?: [0, 0];
+    }
+
+    private static function matchStart($match)
+    {
+        if (empty($match['matchDateTimeUTC'])) return null;
+        try {
+            return (new DateTimeImmutable($match['matchDateTimeUTC'], new DateTimeZone('UTC')))
+                ->setTimezone(new DateTimeZone('Europe/Berlin'));
+        } catch (Throwable $error) {
+            return null;
+        }
+    }
+
+    private function refreshDay($day, DateTimeImmutable $now)
     {
         $matches = call_user_func($this->fetch, $day);
-        $changed = 0;
+        $stats = ['schedule' => 0, 'live' => 0, 'finished' => 0];
         foreach ($matches as $match) {
             $id = (int)($match['matchID'] ?? 0);
             if ($id <= 0 || (int)($match['group']['groupOrderID'] ?? 0) !== $day) continue;
             $row = mysqli_fetch_assoc($this->query("SELECT * FROM tblspieltag WHERE intTag=$day AND intMatchIdFromOpenLigaDB=$id"));
             if (!$row) continue;
             $pk = (int)$row['lngIndex'];
-            if (!empty($match['matchDateTimeUTC'])) {
-                $start = (new DateTimeImmutable($match['matchDateTimeUTC'], new DateTimeZone('UTC')))
-                    ->setTimezone(new DateTimeZone('Europe/Berlin'))->format('Y-m-d H:i:s');
-                $this->query("UPDATE tblspieltag SET dtmStart='$start' WHERE lngIndex=$pk");
+            $start = self::matchStart($match);
+            if ($start !== null) {
+                $startSql = $start->format('Y-m-d H:i:s');
+                if (($row['dtmStart'] ?? null) !== $startSql) {
+                    $this->query("UPDATE tblspieltag SET dtmStart='$startSql' WHERE lngIndex=$pk");
+                    $stats['schedule']++;
+                }
             }
-            $score = self::finalScore($match);
-            if (!$evaluate || $score === null) continue;
-            list($a, $b) = $score;
-            if ((int)$row['intStatus'] !== 2 || (int)$row['intGoal1'] !== $a || (int)$row['intGoal2'] !== $b) {
-                $this->query("UPDATE tblspieltag SET intStatus=2,intGoal1=$a,intGoal2=$b WHERE lngIndex=$pk");
-                $changed++;
+
+            $finalScore = self::finalScore($match);
+            if ($finalScore !== null) {
+                list($a, $b) = $finalScore;
+                if ((int)$row['intStatus'] !== 2 || (int)$row['intGoal1'] !== $a || (int)$row['intGoal2'] !== $b) {
+                    $this->query("UPDATE tblspieltag SET intStatus=2,intGoal1=$a,intGoal2=$b WHERE lngIndex=$pk");
+                    $stats['finished']++;
+                }
+                continue;
+            }
+
+            $hasStarted = $start !== null && $start <= $now;
+            if (!$hasStarted && (int)$row['intStatus'] !== 1) continue;
+            list($a, $b) = self::currentScore($match);
+            if ((int)$row['intStatus'] !== 1 || (int)$row['intGoal1'] !== $a || (int)$row['intGoal2'] !== $b) {
+                $this->query("UPDATE tblspieltag SET intStatus=1,intGoal1=$a,intGoal2=$b WHERE lngIndex=$pk");
+                $stats['live']++;
             }
         }
-        return $changed;
+        return $stats;
     }
 
     public function recalculatePoints()
@@ -110,22 +153,28 @@ class MatchUpdate
         if ((int)mysqli_fetch_row($this->query("SELECT GET_LOCK('$lock',0)"))[0] !== 1) return ['busy' => true];
         try {
             $now = $now ?: new DateTimeImmutable('now', new DateTimeZone('Europe/Berlin'));
-            $due = $now->setTimezone(new DateTimeZone('Europe/Berlin'))->modify('-105 minutes')->format('Y-m-d H:i:s');
-            $days = $this->query("SELECT DISTINCT intTag FROM tblspieltag WHERE intStatus<>2 AND dtmStart<='$due' ORDER BY intTag");
-            $changed = 0;
+            $now = $now->setTimezone(new DateTimeZone('Europe/Berlin'));
+            $currentDay = (int)mysqli_fetch_assoc($this->query('SELECT intDay FROM tblinfo LIMIT 1'))['intDay'];
+            $dayNumbers = [$currentDay => true];
+            if ($currentDay < (int)CONST_NUMBER_OF_MATCH_DAYS) $dayNumbers[$currentDay + 1] = true;
+            $due = $now->format('Y-m-d H:i:s');
+            $days = $this->query("SELECT DISTINCT intTag FROM tblspieltag WHERE intStatus=1 OR (intStatus<>2 AND dtmStart<='$due') ORDER BY intTag");
+            while ($row = mysqli_fetch_assoc($days)) $dayNumbers[(int)$row['intTag']] = true;
+            ksort($dayNumbers);
+            $stats = ['schedule' => 0, 'live' => 0, 'finished' => 0];
             $errors = [];
-            while ($row = mysqli_fetch_assoc($days)) {
-                $day = (int)$row['intTag'];
-                try { $changed += $this->refreshDay($day, true); }
-                catch (Throwable $e) { $errors[] = $e->getMessage(); }
-                if ($day < (int)CONST_NUMBER_OF_MATCH_DAYS) {
-                    try { $this->refreshDay($day + 1, false); }
-                    catch (Throwable $e) { $errors[] = $e->getMessage(); }
+            foreach (array_keys($dayNumbers) as $day) {
+                if ($day < 1 || $day > (int)CONST_NUMBER_OF_MATCH_DAYS) continue;
+                try {
+                    $dayStats = $this->refreshDay($day, $now);
+                    foreach ($stats as $key => $value) $stats[$key] += $dayStats[$key];
                 }
+                catch (Throwable $e) { $errors[] = $e->getMessage(); }
             }
             // Also repairs totals if a previous run stopped after writing a result.
             $this->recalculatePoints();
-            return ['evaluated' => $changed, 'currentDay' => $this->advanceCompletedDay(), 'errors' => $errors];
+            return ['updated' => $stats, 'evaluated' => $stats['finished'],
+                'currentDay' => $this->advanceCompletedDay(), 'errors' => $errors];
         } finally {
             $this->query("SELECT RELEASE_LOCK('$lock')");
         }

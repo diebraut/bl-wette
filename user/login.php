@@ -29,10 +29,10 @@ if (is_file($localSessionConfig)) {
                                 var strURL="usertip.php?user=" + userid + "&day=" + dayid;
                                 window.open(strURL, "", "width=454, height=280");
                         }
-                        function openall(dayid)
+                        function openall(dayid, userid)
                         {
-                                var strURL="alltips.php?day=" + dayid;
-                                window.open(strURL, "Alle_Tipps", "width=900, height=330,resizable=yes");
+                                var strURL="alltips.php?day=" + dayid + "&user=" + encodeURIComponent(userid || "");
+                                window.open(strURL, "Alle_Tipps", "width=1400,height=750,resizable=yes,scrollbars=yes");
                         }
                         function setHigh(id1,id2)
                         {
@@ -894,7 +894,7 @@ if (is_file($localSessionConfig)) {
                                         <td align="right" height="60"><img src="pic/tippdrucken.gif" width="120" height="20" alt="" border="0" onclick="window.print()" style="cursor:pointer">&nbsp;<img src="./pic/tippen.gif" border="0" onclick="document.xform.submit()" style="cursor:pointer"></td>
                                 </tr>
                                 <tr>
-                                        <td align="right" height="30"><img src="pic/alletipps.gif" width="120" height="20" alt="" border="0" <?php if ($statusSpielTag == 1) { ?> onclick="openall( <?php echo $actDay ?> )" <?php } ?>  style="cursor:pointer"></td>
+                                        <td align="right" height="30"><img src="pic/alletipps.gif" width="120" height="20" alt="Alle Tipps" border="0" onclick="openall(<?php echo (int)$actDay; ?>, <?php echo htmlspecialchars(json_encode($menuuser), ENT_QUOTES, 'UTF-8'); ?>)" style="cursor:pointer"></td>
                                 </tr>
                         </table>
                         </form>

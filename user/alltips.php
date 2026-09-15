@@ -1,222 +1,348 @@
 <?php
-header('Content-type: text/html; charset=utf-8');
-
-$localSessionConfig = __DIR__ . '/../common/config.local.php';
-if (is_file($localSessionConfig)) {
-   $localSessionOptions = require $localSessionConfig;
-   if (!empty($localSessionOptions['persistent_login'])) {
-      $localSessionLifetime = isset($localSessionOptions['session_timeout_seconds']) ? max(60, (int)$localSessionOptions['session_timeout_seconds']) : 1800;
-      ini_set('session.gc_maxlifetime', $localSessionLifetime);
-      session_set_cookie_params($localSessionLifetime, '/');
-      session_start();
-      setcookie(session_name(), session_id(), time() + $localSessionLifetime, '/');
-   }
+header('Content-Type: text/html; charset=utf-8');
+header('Cache-Control: no-store');
+require __DIR__ . '/../common/include.php';
+$db = mysqli_connect(HOST, DB_USER, DB_PASSWD, DB_NAME);
+mysqli_set_charset($db, 'utf8mb4');
+function tipsEscape($v) { return htmlspecialchars((string)$v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
+$days = array_column(mysqli_fetch_all(mysqli_query($db, 'SELECT DISTINCT intTag FROM tblspieltag ORDER BY intTag'), MYSQLI_ASSOC), 'intTag');
+$info = mysqli_fetch_assoc(mysqli_query($db, 'SELECT intDay FROM tblinfo LIMIT 1'));
+$currentDay = (int)($info['intDay'] ?? 1);
+$currentDayStarted = (int)mysqli_fetch_row(mysqli_query($db,
+    "SELECT EXISTS(SELECT 1 FROM tblspieltag WHERE intTag=$currentDay AND intStatus>=1)"))[0] === 1;
+$sessionToken = $_GET['user'] ?? '';
+$currentUserId = 0;
+if (is_string($sessionToken) && preg_match('/^[a-zA-Z0-9]{1,128}$/D', $sessionToken)) {
+    $sessionStatement = mysqli_prepare($db, 'SELECT intUser FROM tblsession WHERE strSessionid=?');
+    mysqli_stmt_bind_param($sessionStatement, 's', $sessionToken);
+    mysqli_stmt_execute($sessionStatement);
+    $sessionRow = mysqli_fetch_assoc(mysqli_stmt_get_result($sessionStatement));
+    if ($sessionRow) $currentUserId = (int)$sessionRow['intUser'];
+} else {
+    $sessionToken = '';
 }
-
-if(!isset($_POST))
-        $_POST  = $HTTP_POST_VARS;
-if(!isset($_GET))
-        $_GET  = $HTTP_GET_VARS;
-require("../common/include.php");
-
-$db=mysqli_connect("$address", "$dbuser", "$dbpasswd",'bl_wette');
-mysqli_query($db,"SET NAMES utf8");
-
-$user = $_GET['user'] ?? (CONST_LOCAL_PERSISTENT_LOGIN && isset($_SESSION['bl_wette_user']) ? $_SESSION['bl_wette_user'] : '');
-$day  = isset($_GET['day']) ? (int)$_GET['day'] : 0;
-  
-$call_allowed = 0;
-$visibleGames = "";
-if (CONST_PER_MATCH_DEADLINE)
-{
-   // dtmStart contains Berlin local time, independently of the database timezone.
-   $matchNow = date('Y-m-d H:i:s');
-   $startedGames = mysqli_query($db, "SELECT lngIndex FROM tblspieltag WHERE intTag=$day AND (intStatus>=1 OR dtmStart <= '$matchNow')");
-   $call_allowed = (mysqli_num_rows($startedGames) > 0 || $user == "roland") ? 1 : 0;
-   if ($user != "roland")
-   {
-      $visibleGames = " AND (s.intStatus>=1 OR s.dtmStart <= '$matchNow')";
-   }
+$simulateRunning = ($_GET['simulate'] ?? '') === 'running';
+$day = (int)($_GET['day'] ?? ($simulateRunning ? 4 : ($info['intDay'] ?? 1)));
+if (!in_array($day, array_map('intval', $days), true)) $day = (int)($info['intDay'] ?? ($days[0] ?? 1));
+$matches = mysqli_fetch_all(mysqli_query($db, "SELECT s.lngIndex AS gameId,s.intStatus,s.intGoal1,s.intGoal2,s.dtmStart,
+    v1.strName AS team1,v2.strName AS team2 FROM tblspieltag s
+    LEFT JOIN tblverein v1 ON v1.lngIndex=s.intVerein1 LEFT JOIN tblverein v2 ON v2.lngIndex=s.intVerein2
+    WHERE s.intTag=$day ORDER BY s.dtmStart IS NULL,s.dtmStart,s.lngIndex"), MYSQLI_ASSOC);
+$simulatedRunningGameId = 0;
+if ($simulateRunning && $matches) {
+    foreach ($matches as $match) {
+        if (!empty($match['dtmStart']) && (int)date('N', strtotime($match['dtmStart'])) === 5) {
+            $simulatedRunningGameId = (int)$match['gameId'];
+            break;
+        }
+    }
+    if ($simulatedRunningGameId === 0) $simulatedRunningGameId = (int)$matches[0]['gameId'];
 }
-else
-{
-   $sqlRes = mysqli_query($db, "SELECT intStatus FROM tblspieltag WHERE intTag=$day");
-   $status = mysql_result($sqlRes, 0, "intStatus");
-   $call_allowed = (($status >= 1) OR ($user == "roland")) ? 1 : 0;
+foreach ($matches as &$match) {
+    $match['isSimulationGame'] = (int)$match['gameId'] === $simulatedRunningGameId;
+    $match['isRunning'] = !$match['isSimulationGame'] && (int)$match['intStatus'] === 1;
 }
-
-if ($call_allowed == 1)
-{
-   $SQL = "SELECT v1.strName as Team1, v2.strName as Team2, s.lngIndex as SpielId ".
-                        "from tblspieltag as s ".
-                   "LEFT JOIN tblverein as v1 ON (v1.lngIndex=s.intVerein1)".
-                        "LEFT JOIN tblverein as v2 ON (v2.lngIndex=s.intVerein2)".
-                        " WHERE  s.intTag=$day $visibleGames ".
-                        " GROUP BY s.lngIndex ORDER BY s.lngIndex DESC";
-   
-   $result = mysqli_query($db, $SQL);
-   $anzahl = mysqli_num_rows($result);
-   
-   $SQL = "SELECT  SUBSTRING(concat(strAlias,\"........\"),1,8) as Gamer,LngIndex as GamerId, intPoint as gamerScore  from tblgamer  ORDER BY intPoint DESC";
-   $resultGamer = mysqli_query($db, $SQL);
-   $anzahlGamer = mysqli_num_rows($resultGamer);     
-
-   /* hole liste aller spieler mit scores  */  
-   $userPoints = getUserResultArray();
-}       
-
-
+unset($match);
+$players = mysqli_fetch_all(mysqli_query($db, 'SELECT lngIndex AS userId,strAlias,intPoint FROM tblgamer ORDER BY intPoint DESC,strAlias,lngIndex'), MYSQLI_ASSOC);
+// Running matches contribute provisional points; MatchUpdate persists totals only after the final whistle.
+$rows = mysqli_fetch_all(mysqli_query($db, "SELECT w.intUserid,w.intSpielid,w.intGoal1,w.intGoal2,
+    CASE WHEN s.intStatus>=1 AND SIGN(w.intGoal1-w.intGoal2)=SIGN(s.intGoal1-s.intGoal2)
+    THEN 1+(w.intGoal1=s.intGoal1)+(w.intGoal2=s.intGoal2)+(w.intGoal1-w.intGoal2=s.intGoal1-s.intGoal2)
+    ELSE 0 END AS points FROM tblwette w JOIN tblspieltag s ON s.lngIndex=w.intSpielid WHERE s.intTag=$day"), MYSQLI_ASSOC);
+$tips = []; $dayPoints = [];
+foreach ($rows as $tip) {
+    $id = (int)$tip['intUserid'];
+    if ((int)$tip['intSpielid'] === $simulatedRunningGameId) $tip['points'] = 0;
+    $tips[$id][(int)$tip['intSpielid']] = $tip;
+    $dayPoints[$id] = ($dayPoints[$id] ?? 0) + (int)$tip['points'];
+}
+usort($players, function ($a, $b) use ($dayPoints) {
+    $byDay = ($dayPoints[(int)$b['userId']] ?? 0) <=> ($dayPoints[(int)$a['userId']] ?? 0);
+    if ($byDay !== 0) return $byDay;
+    $byTotal = (int)$b['intPoint'] <=> (int)$a['intPoint'];
+    return $byTotal !== 0 ? $byTotal : strcmp($a['strAlias'], $b['strAlias']);
+});
+$now = date('Y-m-d H:i:s');
+$weekdays = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+$dayStarted = false;
+foreach ($matches as $match) { if ((int)$match['intStatus'] >= 1 || $match['isRunning']) $dayStarted = true; }
+$liveMatches = [];
+foreach ($matches as $match) {
+    $visible = $match['isSimulationGame'] ? false : (CONST_PER_MATCH_DEADLINE
+        ? ($match['isRunning'] || (int)$match['intStatus'] >= 1 || (!empty($match['dtmStart']) && $match['dtmStart'] <= $now))
+        : $dayStarted);
+    $liveMatches[] = [
+        (int)$match['gameId'], (int)$match['intStatus'], $match['intGoal1'], $match['intGoal2'],
+        $match['dtmStart'], $match['team1'], $match['team2'], $visible, $match['isRunning'], $match['isSimulationGame']
+    ];
+}
+$livePlayers = [];
+foreach ($players as $player) {
+    $userId = (int)$player['userId'];
+    $visibleTips = [];
+    foreach ($matches as $matchIndex => $match) {
+        if ($userId !== $currentUserId && !$liveMatches[$matchIndex][7]) {
+            $visibleTips[] = null;
+            continue;
+        }
+        $tip = $tips[$userId][(int)$match['gameId']] ?? null;
+        $visibleTips[] = $tip
+            ? [$tip['intGoal1'], $tip['intGoal2'], (int)$tip['points']]
+            : null;
+    }
+    $livePlayers[] = [$userId, $player['strAlias'], (int)$player['intPoint'], $dayPoints[$userId] ?? 0, $visibleTips];
+}
+$liveVersion = hash('sha256', json_encode([$day, $currentDay, $currentDayStarted, $liveMatches, $livePlayers], JSON_INVALID_UTF8_SUBSTITUTE));
 ?>
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//DE">
-<html lang="de">
-<meta http-equiv="Content-Type" content="text/html; charset=utf-8"> 
+<!doctype html>
+<html lang="de"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alle Tipps – Spieltag <?php echo $day; ?></title>
+<link rel="stylesheet" href="alltips.css?v=<?php echo (int)filemtime(__DIR__ . '/alltips.css'); ?>">
+</head><body>
+<header class="site-header">Bundesliga Tippspiel</header>
+<main data-live-version="<?php echo $liveVersion; ?>" data-current-day="<?php echo $currentDay; ?>" data-current-day-started="<?php echo $currentDayStarted ? '1' : '0'; ?>"><h1>Alle Tipps</h1>
+<div class="toolbar">
+<form method="get"><label for="day">Spieltag</label>
+<?php if ($sessionToken !== ''): ?><input type="hidden" name="user" value="<?php echo tipsEscape($sessionToken); ?>"><?php endif; ?>
+<?php if ($simulateRunning): ?><input type="hidden" name="simulate" value="running"><?php endif; ?>
+<select name="day" id="day" onchange="this.form.submit()">
+<?php foreach ($days as $option): ?>
+<option value="<?php echo (int)$option; ?>" <?php if ((int)$option === $day) echo 'selected'; ?>><?php echo (int)$option; ?></option>
+<?php endforeach; ?></select><noscript><button>Anzeigen</button></noscript></form>
+<span>Sortiert nach Spieltag-Punkten</span>
+<?php if ($simulateRunning): ?><div class="simulation-controls" aria-label="Spielsimulation">
+<button type="button" data-simulation-action="start">Spiel beginnen</button>
+<button type="button" data-simulation-action="away-goal">Tor Gast</button>
+<button type="button" data-simulation-action="home-goal">Tor Heim</button>
+<button type="button" data-simulation-action="finish">Spiel beenden</button>
+</div><?php endif; ?>
+<button class="print" onclick="window.print()">Tipps drucken</button>
+</div>
+<div class="table-scroll" role="region" aria-label="Tipps aller Spieler" tabindex="0"><table>
+<thead><tr>
+<th scope="col" rowspan="2">Rang</th><th scope="col" rowspan="2" class="player">Spieler</th>
+<th scope="col" rowspan="2" class="day-points" aria-sort="descending">Spieltag-<br>Punkte ↓</th>
+<?php foreach ($matches as $match): $start = !empty($match['dtmStart']) ? strtotime($match['dtmStart']) : false; ?>
+<th scope="col" class="match<?php echo $match['isSimulationGame'] ? ' simulation-game' : ''; ?><?php echo $match['isRunning'] ? ' running-game' : ''; ?>"><span><?php echo tipsEscape($match['team1']); ?></span><span class="versus">–</span>
+<span><?php echo tipsEscape($match['team2']); ?></span>
+<small><?php echo $start ? tipsEscape($weekdays[(int)date('w',$start)] . ' ' . date('d.m. H:i',$start)) : 'Termin offen'; ?></small></th>
+<?php endforeach; ?></tr><tr class="results">
+<?php foreach ($matches as $match): ?>
+<td class="<?php echo $match['isSimulationGame'] ? 'simulation-game simulation-result' : ''; ?><?php echo $match['isRunning'] ? ' running-game' : ''; ?>"><?php echo $match['isSimulationGame'] ? 'Offen'
+    : ($match['isRunning'] ? '<span class="live-dot" aria-hidden="true"></span>Spiel läuft · ' . (int)$match['intGoal1'] . ':' . (int)$match['intGoal2']
+    : ((int)$match['intStatus'] === 2 ? 'Endstand ' . (int)$match['intGoal1'] . ':' . (int)$match['intGoal2']
+    : (((int)$match['intStatus'] >= 1 || (!empty($match['dtmStart']) && $match['dtmStart'] <= $now)) ? 'Ergebnis offen' : 'Offen'))); ?></td>
+<?php endforeach; ?></tr></thead><tbody>
+<?php $previousPoints = null; $rank = 0; foreach ($players as $index => $player):
+    $id = (int)$player['userId'];
+    $rankingPoints = [$dayPoints[$id] ?? 0, (int)$player['intPoint']];
+    if ($previousPoints !== $rankingPoints) $rank = $index + 1;
+    $previousPoints = $rankingPoints; ?>
+<tr data-user-id="<?php echo $id; ?>" data-player-name="<?php echo tipsEscape($player['strAlias']); ?>" data-total-points="<?php echo (int)$player['intPoint']; ?>" data-base-day-points="<?php echo $dayPoints[$id] ?? 0; ?>"><td class="rank-value"><?php echo $rank; ?></td><th scope="row" class="player"><?php echo tipsEscape($player['strAlias']); ?> (<?php echo (int)$player['intPoint']; ?>)</th>
+<td class="day-points"><?php echo $dayPoints[$id] ?? 0; ?></td>
+<?php foreach ($matches as $match):
+    $visible = $id === $currentUserId || ($match['isSimulationGame'] ? false : (CONST_PER_MATCH_DEADLINE ? ($match['isRunning'] || (int)$match['intStatus'] >= 1 || (!empty($match['dtmStart']) && $match['dtmStart'] <= $now)) : $dayStarted));
+    $tip = $tips[$id][(int)$match['gameId']] ?? null;
+    $hasTip = $tip && $tip['intGoal1'] !== null && $tip['intGoal2'] !== null;
+    $points = $hasTip ? (int)$tip['points'] : 0; ?>
+<td class="<?php echo trim(($match['isSimulationGame'] ? 'simulation-game simulation-tip ' : '') . ($id === $currentUserId ? 'own-tip ' : '') . ($match['isRunning'] ? 'running-game ' : '') . (!$visible ? 'hidden-tip' : '')); ?>"
+<?php if ($match['isSimulationGame']): ?>data-tip-home="<?php echo $hasTip ? (int)$tip['intGoal1'] : ''; ?>" data-tip-away="<?php echo $hasTip ? (int)$tip['intGoal2'] : ''; ?>"<?php endif; ?>
+title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasTip && (int)$match['intStatus'] >= 1 ? $points . ((int)$match['intStatus'] === 2 ? ' Punkte für den Endstand' : ' Punkte beim aktuellen Spielstand') : ''); ?>">
+<span class="<?php echo $visible && $points > 0 ? 'scored scored-' . min(4, $points) : ''; ?>"><?php echo !$visible ? 'Verdeckt' : ($hasTip ? (int)$tip['intGoal1'] . ':' . (int)$tip['intGoal2'] : '-:-'); ?><?php if ($visible && $hasTip && $points > 0) echo ' (' . $points . ')'; ?></span></td>
+<?php endforeach; ?></tr><?php endforeach; ?>
+<?php if (!$players): ?><tr><td colspan="<?php echo 3 + count($matches); ?>">Noch keine Spieler vorhanden.</td></tr><?php endif; ?>
+</tbody></table></div>
+<?php if (!$matches): ?><p>Für diesen Spieltag sind noch keine Paarungen vorhanden.</p><?php endif; ?>
+<footer><p><strong>Spieltag-Punkte:</strong> aktuelle Punkte aus laufenden und beendeten Begegnungen.</p>
+<p>-:- Kein Tipp · Verdeckt: Freigabe nach Anpfiff · Grün: Punkte erzielt</p></footer>
+</main>
+<script>
+(function () {
+    'use strict';
+    var day = <?php echo $day; ?>;
+    var simulateRunning = <?php echo $simulateRunning ? 'true' : 'false'; ?>;
+    var sessionToken = <?php echo json_encode($sessionToken, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+    var observedCurrentDay = <?php echo $currentDay; ?>;
+    var observedCurrentDayStarted = <?php echo $currentDayStarted ? 'true' : 'false'; ?>;
+    var refreshing = false;
+    var simulationState = {
+        phase: simulateRunning ? 'open' : 'off',
+        home: 0,
+        away: 0
+    };
 
-<?php
-if ( $call_allowed == 1 )
-{
-?>
-        
-    <head>
-        <link rel="stylesheet" type="text/css" href="../common/style.css">
-        <title>Usertip</title>
-    </head>
-    <body leftmargin="2" rightmargin="2" topmargin="2" bottommargin="0" style="border:none">
-    <table  border="0" width="100%" cellpadding="0" cellspacing="0">
-        <tr>
-                <td align="center" height="25" class="title">
-                        Die Tipps von <strong>allen Spielern</strong> vom <?php echo $day?> Spieltag
-                </td>
-        </tr>
-    </table>
-    <table width="100%" border="0" cellpadding="0" cellspacing="0" class="tablestyle">
-                        <tr>
-                                <td colspan="3" align="center" class="head"><strong>Paarungen</strong></td>
-                                <td align="center" class="head" ></td>
-                                <?php
-                                for ($i = 0; $i < $anzahlGamer; $i++)
-                                {
-                                   $gamer = mysql_result($resultGamer,$i, "Gamer");
-                                   ?>
-                                   <td align="center" colspan="3" class="head" width="5%" ><strong><?php echo $gamer?></strong></td>
-                                         <td align="center" class="head" ></td>
-                                   <?php
-                                }   
-                                ?>
-                        </tr>
-                        <tr>
-                                <td colspan="3" align="center" class="head"><strong></strong></td>
-                                <td align="center" class="head" ></td>
-                                <?php
-                                for ($i = 0; $i < $anzahlGamer; $i++)
-                                {
-                                	
-                                   $gamerId = mysql_result($resultGamer,$i, "GamerId");
-                                   foreach ($userPoints as $item)
-                                   {
-                                       if ( $item[0] == $gamerId )
-                                       {
-                                   	 $points = $item[2];
-                                   	 break;
-       	                               }
-                                   }                          
-                                   $txtHlp = "(".$points.")";
-                                   ?>
-                                   <td align="center" colspan="3" class="head" width="5%" ><strong><?php echo $txtHlp?></strong></td>
-                                         <td align="center" class="head" ></td>
-                                   <?php
-                                }   
-                                ?>
-                
-                        </tr>
-                        <tr>
-                                <td colspan="3" align="center" class="head"><img color="black" src="pic/horzstr.gif" height = "1" width = "100%"></td>
-                                <td align="center" class="head" ></td>
-                                <?php
-                                for ($i = 0; $i < $anzahlGamer; $i++)
-                                {
-                                   ?>
-                                   <td align="center" colspan="3" class="head" width="5%" ><img color="black" src="pic/horzstr.gif" height = "1" width = "100%"></td>
-                                         <td align="center" class="head" ></td>
-                                   <?php
-                                }   
-                                ?>
-                        </tr><?php
-                        //while($anzahl > -1)
-                        for($i = 0; $i < $anzahl; $i++)
-                        {
-                                $ver1 = mysql_result($result,$i, "Team1");
-                                $ver2 = mysql_result($result,$i, "Team2");
-                                //$ver1 = utf8_encode($ver1);
-                                //$ver2 = utf8_encode($ver2);
-                                if($i % 2)
-                                        $classname = "firstline";
-                                ?>
-                                  <tr class="<?php echo $classname?>">
-                                        <td align="center" class="<?php echo $classname?>" width="15%"><?php echo $ver1?></td>
-                                        <td align="center" class="<?php echo $classname?>">:</td>
-                                        <td align="center" class="<?php echo $classname?>" width="15%"><?php echo  $ver2?></td>
-                                        <td align="center" class="rowdelimiter"><img color="black" src="pic/senkstr.gif" height = "20" width = "1"></td>
-                                   <?php
-                                   for ($y = 0; $y < $anzahlGamer; $y++)
-                                   {
-                                      $gamerId = mysql_result($resultGamer,$y, "GamerId");
-                                      $spielId = mysql_result($result,$i, "SpielId");
-                                      $SQL = "SELECT intGoal1,intGoal2 from tblwette where intUserid = $gamerId and intSpielid = $spielId";
-                                      $resultWette = mysqli_query($db,$SQL);
-                                      $num_rows = mysqli_num_rows($resultWette);
-                                      if ($num_rows > 0)
-                                      {
-                                          $goal1 = mysql_result($resultWette,0, "intGoal1");
-                                          $goal2 = mysql_result($resultWette,0, "intGoal2");
-                                      }
-                                      else 
-                                      {
-                                          $goal1 = '-';
-                                          $goal2 = '-';
-                                      }
-                                      $classname = "secondcolumn";
-                                      if($y % 2)
-                                         $classname = "firstcolumn";
-                                      ?>
-                                      <td align="center" class="<?php echo $classname?>"><?php echo $goal1?></td>
-                                      <td align="center" class="<?php echo $classname?>">:</td>
-                                      <td align="center" class="<?php echo $classname?>"><?php echo $goal2?></td>
-                                      <td align="center" class="rowdelimiter"><img color="black" src="pic/senkstr.gif" height = "20" width="1" ></td>
-                                      <?php
-                                    }
-                                 ?> 
-                                </tr>
-                                <tr class="<?php echo $classname?>">
-                                <?php
-                                $anzCols = ($anzahlGamer + 1) * 4   
-                                ?>
-                                <td colspan="<?php echo $anzCols?>" align="center" class="head"><img height="1" src="pic/horzstr_1.gif" width = "100%"></td>
-                                </tr><?php
-                        }
-                        ?>
-        </table>
-        <table cellpadding="0" cellspacing="0" border="0" width="100%" height="50">
-                <tr>
-                        <td align="right" height="30"></td>
-                </tr>
-        </table>
-        <table cellpadding="0" cellspacing="0" border="0" width="100%" height="30">
-                <tr>
-                        <td align="left" height="30"><img src="pic/tippsdrucken.gif" width="120" height="20" alt="" border="0" onclick="javascript:window.print()" style="cursor:pointer"></td>
-                </tr>
-        </table>
-                
-    </body>
-<?php
-}
-else
-{
-?>
-    <head>
-    <link rel="stylesheet" type="text/css" href="../common/style.css">
-    <title>Nicht erlaubt solange noch getippt werden kann!!!!!</title>
-    </head> 
-<?php
-}
-?>
-</html>
+    function simulatedTipPoints(tipHome, tipAway) {
+        var resultDifference = simulationState.home - simulationState.away;
+        var tipDifference = tipHome - tipAway;
+        if (Math.sign(resultDifference) !== Math.sign(tipDifference)) return 0;
+        return 1
+            + (tipHome === simulationState.home ? 1 : 0)
+            + (tipAway === simulationState.away ? 1 : 0)
+            + (tipDifference === resultDifference ? 1 : 0);
+    }
+
+    function updateSimulatedRanking() {
+        var body = document.querySelector('tbody');
+        if (!body) return;
+        var rows = Array.from(body.querySelectorAll('tr[data-user-id]'));
+        rows.forEach(function (row) {
+            var tipCell = row.querySelector('.simulation-tip');
+            var tipHomeText = tipCell ? String(tipCell.dataset.tipHome || '').trim() : '';
+            var tipAwayText = tipCell ? String(tipCell.dataset.tipAway || '').trim() : '';
+            var tipHome = tipHomeText !== '' ? Number(tipHomeText) : NaN;
+            var tipAway = tipAwayText !== '' ? Number(tipAwayText) : NaN;
+            var isOwnTip = tipCell && tipCell.classList.contains('own-tip');
+            var isHidden = simulationState.phase === 'open' && !isOwnTip;
+            var points = simulationState.phase !== 'open' && simulationState.phase !== 'off'
+                && Number.isFinite(tipHome) && Number.isFinite(tipAway)
+                ? simulatedTipPoints(tipHome, tipAway) : 0;
+            var dayPoints = Number(row.dataset.baseDayPoints || 0) + points;
+            row.dataset.currentDayPoints = String(dayPoints);
+            var dayPointsCell = row.querySelector('.day-points');
+            if (dayPointsCell) dayPointsCell.textContent = String(dayPoints);
+            if (tipCell) {
+                var tipText = Number.isFinite(tipHome) && Number.isFinite(tipAway) ? tipHome + ':' + tipAway : '-:-';
+                var tipSpan = tipCell.querySelector('span');
+                if (tipSpan) {
+                    tipSpan.textContent = isHidden
+                        ? 'Verdeckt'
+                        : tipText + (points > 0 ? ' (' + points + ')' : '');
+                    tipSpan.className = points > 0 ? 'scored scored-' + Math.min(4, points) : '';
+                }
+                tipCell.classList.toggle('hidden-tip', isHidden);
+                tipCell.title = isHidden
+                    ? 'Tipps werden erst nach Anpfiff sichtbar'
+                    : (simulationState.phase === 'open' ? 'Eigener Tipp' : (simulationState.phase === 'finished'
+                    ? points + ' Punkte für den Endstand'
+                    : points + ' Punkte beim aktuellen Spielstand'));
+            }
+        });
+        rows.sort(function (left, right) {
+            var byDay = Number(right.dataset.currentDayPoints) - Number(left.dataset.currentDayPoints);
+            if (byDay !== 0) return byDay;
+            var byTotal = Number(right.dataset.totalPoints) - Number(left.dataset.totalPoints);
+            if (byTotal !== 0) return byTotal;
+            return String(left.dataset.playerName).localeCompare(String(right.dataset.playerName), 'de');
+        });
+        rows.forEach(function (row) { body.appendChild(row); });
+        var previousKey = null;
+        var rank = 0;
+        rows.forEach(function (row, index) {
+            var key = row.dataset.currentDayPoints + ':' + row.dataset.totalPoints;
+            if (key !== previousKey) rank = index + 1;
+            previousKey = key;
+            var rankCell = row.querySelector('.rank-value');
+            if (rankCell) rankCell.textContent = String(rank);
+        });
+    }
+
+    function renderSimulation() {
+        if (!simulateRunning) return;
+        var isRunning = simulationState.phase === 'running';
+        document.querySelectorAll('.simulation-game').forEach(function (cell) {
+            cell.classList.toggle('running-game', isRunning);
+        });
+        var resultCell = document.querySelector('.simulation-result');
+        if (resultCell) {
+            resultCell.innerHTML = simulationState.phase === 'open'
+                ? 'Offen'
+                : (isRunning
+                ? '<span class="live-dot" aria-hidden="true"></span>Spiel läuft · ' + simulationState.home + ':' + simulationState.away
+                : 'Endstand ' + simulationState.home + ':' + simulationState.away);
+        }
+        var startButton = document.querySelector('[data-simulation-action="start"]');
+        if (startButton) startButton.disabled = isRunning;
+        document.querySelectorAll('[data-simulation-action="away-goal"], [data-simulation-action="home-goal"], [data-simulation-action="finish"]').forEach(function (button) {
+            button.disabled = !isRunning;
+        });
+        updateSimulatedRanking();
+    }
+
+    document.addEventListener('click', function (event) {
+        var button = event.target.closest('[data-simulation-action]');
+        if (!button) return;
+        var action = button.dataset.simulationAction;
+        if (action === 'start') {
+            simulationState.phase = 'running';
+            simulationState.home = 0;
+            simulationState.away = 0;
+        } else if (action === 'home-goal' && simulationState.phase === 'running') {
+            simulationState.home++;
+        } else if (action === 'away-goal' && simulationState.phase === 'running') {
+            simulationState.away++;
+        } else if (action === 'finish' && simulationState.phase === 'running') {
+            simulationState.phase = 'finished';
+        }
+        renderSimulation();
+    });
+
+    async function refreshAllTips() {
+        if (refreshing || document.hidden) return;
+        refreshing = true;
+        var controller = new AbortController();
+        var timeout = window.setTimeout(function () { controller.abort(); }, 10000);
+        try {
+            var refreshUrl = new URL('alltips.php', window.location.href);
+            refreshUrl.searchParams.set('day', String(day));
+            refreshUrl.searchParams.set('live', '1');
+            refreshUrl.searchParams.set('_', String(Date.now()));
+            if (simulateRunning) refreshUrl.searchParams.set('simulate', 'running');
+            if (sessionToken) refreshUrl.searchParams.set('user', sessionToken);
+            var response = await fetch(refreshUrl.pathname + refreshUrl.search, {
+                cache: 'no-store',
+                credentials: 'same-origin',
+                signal: controller.signal
+            });
+            if (!response.ok) return;
+            var html = await response.text();
+            var nextDocument = new DOMParser().parseFromString(html, 'text/html');
+            var currentMain = document.querySelector('main[data-live-version]');
+            var nextMain = nextDocument.querySelector('main[data-live-version]');
+            if (!currentMain || !nextMain || currentMain.dataset.liveVersion === nextMain.dataset.liveVersion) return;
+
+            var nextCurrentDay = Number(nextMain.dataset.currentDay);
+            var nextCurrentDayStarted = nextMain.dataset.currentDayStarted === '1';
+            if (Number.isInteger(nextCurrentDay) && nextCurrentDay !== observedCurrentDay) {
+                observedCurrentDay = nextCurrentDay;
+                observedCurrentDayStarted = false;
+            }
+            if (!simulateRunning && nextCurrentDayStarted && !observedCurrentDayStarted && day !== nextCurrentDay) {
+                var targetUrl = new URL('alltips.php', window.location.href);
+                targetUrl.searchParams.set('day', String(nextCurrentDay));
+                targetUrl.searchParams.delete('live');
+                targetUrl.searchParams.delete('_');
+                if (sessionToken) targetUrl.searchParams.set('user', sessionToken);
+                window.location.replace(targetUrl.pathname + targetUrl.search);
+                return;
+            }
+            observedCurrentDayStarted = nextCurrentDayStarted;
+
+            var currentTable = currentMain.querySelector('.table-scroll');
+            var scrollLeft = currentTable ? currentTable.scrollLeft : 0;
+            var scrollTop = currentTable ? currentTable.scrollTop : 0;
+            currentMain.innerHTML = nextMain.innerHTML;
+            currentMain.dataset.liveVersion = nextMain.dataset.liveVersion;
+            var nextTable = currentMain.querySelector('.table-scroll');
+            if (nextTable) {
+                nextTable.scrollLeft = scrollLeft;
+                nextTable.scrollTop = scrollTop;
+            }
+            renderSimulation();
+        } catch (error) {
+            if (error.name !== 'AbortError') console.warn('Alltips-Aktualisierung fehlgeschlagen:', error);
+        } finally {
+            window.clearTimeout(timeout);
+            refreshing = false;
+        }
+    }
+
+    window.setInterval(refreshAllTips, 30000);
+    window.addEventListener('focus', refreshAllTips);
+    document.addEventListener('visibilitychange', function () {
+        if (!document.hidden) refreshAllTips();
+    });
+    renderSimulation();
+}());
+</script>
+</body></html>
