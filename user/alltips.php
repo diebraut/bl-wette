@@ -44,6 +44,10 @@ foreach ($matches as &$match) {
 }
 unset($match);
 $players = mysqli_fetch_all(mysqli_query($db, 'SELECT lngIndex AS userId,strAlias,intPoint FROM tblgamer ORDER BY intPoint DESC,strAlias,lngIndex'), MYSQLI_ASSOC);
+$overallRankByUser = [];
+foreach ($players as $overallIndex => $overallPlayer) {
+    $overallRankByUser[(int)$overallPlayer['userId']] = $overallIndex + 1;
+}
 // Running matches contribute provisional points; MatchUpdate persists totals only after the final whistle.
 $rows = mysqli_fetch_all(mysqli_query($db, "SELECT w.intUserid,w.intSpielid,w.intGoal1,w.intGoal2,
     CASE WHEN s.intStatus>=1 AND SIGN(w.intGoal1-w.intGoal2)=SIGN(s.intGoal1-s.intGoal2)
@@ -90,7 +94,8 @@ foreach ($players as $player) {
             ? [$tip['intGoal1'], $tip['intGoal2'], (int)$tip['points']]
             : null;
     }
-    $livePlayers[] = [$userId, $player['strAlias'], (int)$player['intPoint'], $dayPoints[$userId] ?? 0, $visibleTips];
+    $livePlayers[] = [$userId, $player['strAlias'], (int)$player['intPoint'],
+        $overallRankByUser[$userId], $dayPoints[$userId] ?? 0, $visibleTips];
 }
 $liveVersion = hash('sha256', json_encode([$day, $currentDay, $currentDayStarted, $liveMatches, $livePlayers], JSON_INVALID_UTF8_SUBSTITUTE));
 ?>
@@ -139,7 +144,7 @@ $liveVersion = hash('sha256', json_encode([$day, $currentDay, $currentDayStarted
     $rankingPoints = [$dayPoints[$id] ?? 0, (int)$player['intPoint']];
     if ($previousPoints !== $rankingPoints) $rank = $index + 1;
     $previousPoints = $rankingPoints; ?>
-<tr data-user-id="<?php echo $id; ?>" data-player-name="<?php echo tipsEscape($player['strAlias']); ?>" data-total-points="<?php echo (int)$player['intPoint']; ?>" data-base-day-points="<?php echo $dayPoints[$id] ?? 0; ?>"><td class="rank-value"><?php echo $rank; ?></td><th scope="row" class="player"><?php echo tipsEscape($player['strAlias']); ?> (<?php echo (int)$player['intPoint']; ?>)</th>
+<tr data-user-id="<?php echo $id; ?>" data-player-name="<?php echo tipsEscape($player['strAlias']); ?>" data-total-points="<?php echo (int)$player['intPoint']; ?>" data-base-day-points="<?php echo $dayPoints[$id] ?? 0; ?>"><td class="rank-value"><?php echo $rank; ?></td><th scope="row" class="player"><?php echo tipsEscape($player['strAlias']); ?> (<?php echo (int)$player['intPoint']; ?>, <?php echo $overallRankByUser[$id]; ?>)</th>
 <td class="day-points"><?php echo $dayPoints[$id] ?? 0; ?></td>
 <?php foreach ($matches as $match):
     $visible = $id === $currentUserId || ($match['isSimulationGame'] ? false : (CONST_PER_MATCH_DEADLINE ? ($match['isRunning'] || (int)$match['intStatus'] >= 1 || (!empty($match['dtmStart']) && $match['dtmStart'] <= $now)) : $dayStarted));
