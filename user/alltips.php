@@ -45,8 +45,15 @@ foreach ($matches as &$match) {
 unset($match);
 $players = mysqli_fetch_all(mysqli_query($db, 'SELECT lngIndex AS userId,strAlias,intPoint FROM tblgamer ORDER BY intPoint DESC,strAlias,lngIndex'), MYSQLI_ASSOC);
 $overallRankByUser = [];
+$previousOverallPoints = null;
+$overallRank = 0;
 foreach ($players as $overallIndex => $overallPlayer) {
-    $overallRankByUser[(int)$overallPlayer['userId']] = $overallIndex + 1;
+    $overallPoints = (int)$overallPlayer['intPoint'];
+    if ($previousOverallPoints === null || $overallPoints !== $previousOverallPoints) {
+        $overallRank = $overallIndex + 1;
+    }
+    $overallRankByUser[(int)$overallPlayer['userId']] = $overallRank;
+    $previousOverallPoints = $overallPoints;
 }
 // Running matches contribute provisional points; MatchUpdate persists totals only after the final whistle.
 $rows = mysqli_fetch_all(mysqli_query($db, "SELECT w.intUserid,w.intSpielid,w.intGoal1,w.intGoal2,
@@ -141,7 +148,7 @@ $liveVersion = hash('sha256', json_encode([$day, $currentDay, $currentDayStarted
 <?php endforeach; ?></tr></thead><tbody>
 <?php $previousPoints = null; $rank = 0; foreach ($players as $index => $player):
     $id = (int)$player['userId'];
-    $rankingPoints = [$dayPoints[$id] ?? 0, (int)$player['intPoint']];
+    $rankingPoints = $dayPoints[$id] ?? 0;
     if ($previousPoints !== $rankingPoints) $rank = $index + 1;
     $previousPoints = $rankingPoints; ?>
 <tr data-user-id="<?php echo $id; ?>" data-player-name="<?php echo tipsEscape($player['strAlias']); ?>" data-total-points="<?php echo (int)$player['intPoint']; ?>" data-base-day-points="<?php echo $dayPoints[$id] ?? 0; ?>"><td class="rank-value"><?php echo $rank; ?></td><th scope="row" class="player"><?php echo tipsEscape($player['strAlias']); ?> (<?php echo (int)$player['intPoint']; ?>, <?php echo $overallRankByUser[$id]; ?>)</th>
@@ -234,7 +241,7 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
         var previousKey = null;
         var rank = 0;
         rows.forEach(function (row, index) {
-            var key = row.dataset.currentDayPoints + ':' + row.dataset.totalPoints;
+            var key = row.dataset.currentDayPoints;
             if (key !== previousKey) rank = index + 1;
             previousKey = key;
             var rankCell = row.querySelector('.rank-value');

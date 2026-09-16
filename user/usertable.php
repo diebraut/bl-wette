@@ -34,7 +34,8 @@
         /* hole liste aller spieler mit scores  */  
         $userPoints = getUserResultArray();
         
-	$cnt=$pstart + 1;
+	$rank=0;
+	$previousPoints=null;
 
         ?>
 
@@ -74,6 +75,9 @@
                                         	 break;
        	                                    }
                                         }                          
+					if($previousPoints === null || (int)$point !== $previousPoints)
+						$rank = $i + 1;
+					$previousPoints = (int)$point;
 						
 					$money = mysql_result($result, $i, "intMoney");
 					$hlp = mysqli_query($db, "select COUNT(intTag) AS cnt from tblwette Where intUserid=$id");
@@ -85,7 +89,7 @@
 					{
 					?>
 					<tr bgcolor="black">
-						<td align="right" style="color:white"><strong><?php echo $cnt?>.&nbsp;</strong></td>
+						<td align="right" style="color:white"><strong><?php echo $rank?>.&nbsp;</strong></td>
 						<td style="color:white"><strong><?php echo $alias?></strong></td>
 						<td align="center" style="color:white"><strong><?php echo $point?></strong></td>
 						<td align="center" style="color:white"><strong><?php echo $rel?>%</strong></td>
@@ -102,7 +106,7 @@
 							$classname = "firstline";
 					?>
 					<tr class="<?php echo $classname?>">
-						<td align="right" class="<?php echo $classname?>"><strong><?php echo  $cnt?>.&nbsp;</strong></td>
+						<td align="right" class="<?php echo $classname?>"><strong><?php echo  $rank?>.&nbsp;</strong></td>
 						<td class="<?php echo $classname?>"><strong><?php echo  $alias?></strong></td>
 						<td align="center" class="<?php echo $classname?>"><strong><?php echo  $point?></strong></td>
 						<td align="center" class="<?php echo $classname?>"><strong><?php echo  $rel?>%</strong></td>
@@ -110,7 +114,6 @@
 					</tr>
 					<?php
 					}
-					$cnt++;
 				}			
 				?>
 			</table>
