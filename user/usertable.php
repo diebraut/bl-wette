@@ -33,6 +33,13 @@
 	
         /* hole liste aller spieler mit scores  */  
         $userPoints = getUserResultArray();
+
+        /* Die Trefferquote bezieht sich auf alle bereits beendeten
+           Begegnungen, nicht nur auf die vom jeweiligen Spieler getippten
+           Partien. Pro Begegnung sind maximal vier Punkte moeglich. */
+        $finishedMatchesResult = mysqli_query($db, "SELECT COUNT(*) AS cnt FROM tblspieltag WHERE intStatus=2");
+        $finishedMatches = (int)mysql_result($finishedMatchesResult, 0, "cnt");
+        $maximumPlayedPoints = $finishedMatches * 4;
         
 	$rank=0;
 	$previousPoints=null;
@@ -66,6 +73,7 @@
 				{
 					$id = mysql_result($result, $i, "GamerId");
 					$alias = mysql_result($result, $i, "strAlias");
+					$point = 0;
 
                                         foreach ($userPoints as $item)
                                         {
@@ -81,10 +89,10 @@
 						
 					$money = mysql_result($result, $i, "intMoney");
 					$hlp = mysqli_query($db, "select COUNT(intTag) AS cnt from tblwette Where intUserid=$id");
-					if(mysql_result($hlp, 0, "cnt") != 0)
-                                                $rel = round(($point/(mysql_result($hlp, 0, "cnt")/9*36))*100,2);
-					else
-						$rel = 0;
+					$tipCount = (int)mysql_result($hlp, 0, "cnt");
+					$rel = $maximumPlayedPoints > 0
+						? round(($point / $maximumPlayedPoints) * 100, 2)
+						: 0;
 					if($user == $id)
 					{
 					?>
@@ -93,7 +101,7 @@
 						<td style="color:white"><strong><?php echo $alias?></strong></td>
 						<td align="center" style="color:white"><strong><?php echo $point?></strong></td>
 						<td align="center" style="color:white"><strong><?php echo $rel?>%</strong></td>
-						<td align="center" style="color:white"><strong><?php echo round(mysql_result($hlp, 0, "cnt")/9,0)?></strong></td>
+						<td align="center" style="color:white"><strong><?php echo round($tipCount/9,0)?></strong></td>
 					</tr>
 					<?php
 					}
@@ -110,7 +118,7 @@
 						<td class="<?php echo $classname?>"><strong><?php echo  $alias?></strong></td>
 						<td align="center" class="<?php echo $classname?>"><strong><?php echo  $point?></strong></td>
 						<td align="center" class="<?php echo $classname?>"><strong><?php echo  $rel?>%</strong></td>
-						<td align="center" class="<?php echo $classname?>"><strong><?php echo  round(mysql_result($hlp, 0, "cnt")/9,0)?></strong></td>
+						<td align="center" class="<?php echo $classname?>"><strong><?php echo  round($tipCount/9,0)?></strong></td>
 					</tr>
 					<?php
 					}
