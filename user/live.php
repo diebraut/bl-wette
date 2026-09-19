@@ -16,6 +16,7 @@ if (!mysqli_fetch_assoc(mysqli_stmt_get_result($statement))) {
     http_response_code(401); echo '{}'; exit;
 }
 $currentDay = (int)mysqli_fetch_row(mysqli_query($db, 'SELECT intDay FROM tblinfo LIMIT 1'))[0];
+$running = (int)mysqli_fetch_row(mysqli_query($db, 'SELECT EXISTS(SELECT 1 FROM tblspieltag WHERE intStatus=1)'))[0] === 1;
 $actDay = max(1, min(34, (int)($_POST['day'] ?? $currentDay)));
 $view = $_POST['view'] ?? '';
 $previousVersion = $_POST['version'] ?? '';
@@ -30,12 +31,12 @@ ob_start();
 if (isset($templates[$view])) include __DIR__ . '/' . $templates[$view];
 $html = ob_get_clean();
 $clubs = mysqli_fetch_all(mysqli_query($db, 'SELECT strName,intPoint,CAST(intGoal AS SIGNED)-CAST(intGGoal AS SIGNED) AS diff FROM tblverein ORDER BY intPoint DESC,diff DESC,intGoal DESC,lngIndex ASC'), MYSQLI_ASSOC);
-$payload = ['html' => $html, 'clubs' => $clubs, 'currentDay' => $currentDay];
+$payload = ['html' => $html, 'clubs' => $clubs, 'currentDay' => $currentDay, 'running' => $running];
 // Hash the actual view, including result corrections and matchday advancement.
 // No timestamps: an unchanged view must have an unchanged version.
 $version = hash('sha256', json_encode($payload, JSON_INVALID_UTF8_SUBSTITUTE));
 if (is_string($previousVersion) && hash_equals($version, $previousVersion)) {
-    echo json_encode(['changed' => false, 'version' => $version]);
+    echo json_encode(['changed' => false, 'version' => $version, 'running' => $running]);
     exit;
 }
 echo json_encode(['changed' => true, 'version' => $version] + $payload, JSON_INVALID_UTF8_SUBSTITUTE);

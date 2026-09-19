@@ -147,7 +147,7 @@ class MatchUpdate
         return $next;
     }
 
-    public function run($now = null)
+    public function run($now = null, $liveOnly = false)
     {
         $lock = 'bl-wette-results-' . DB_NAME;
         if ((int)mysqli_fetch_row($this->query("SELECT GET_LOCK('$lock',0)"))[0] !== 1) return ['busy' => true];
@@ -155,10 +155,12 @@ class MatchUpdate
             $now = $now ?: new DateTimeImmutable('now', new DateTimeZone('Europe/Berlin'));
             $now = $now->setTimezone(new DateTimeZone('Europe/Berlin'));
             $currentDay = (int)mysqli_fetch_assoc($this->query('SELECT intDay FROM tblinfo LIMIT 1'))['intDay'];
-            $dayNumbers = [$currentDay => true];
-            if ($currentDay < (int)CONST_NUMBER_OF_MATCH_DAYS) $dayNumbers[$currentDay + 1] = true;
+            $dayNumbers = $liveOnly ? [] : [$currentDay => true];
+            if (!$liveOnly && $currentDay < (int)CONST_NUMBER_OF_MATCH_DAYS) $dayNumbers[$currentDay + 1] = true;
             $due = $now->format('Y-m-d H:i:s');
-            $days = $this->query("SELECT DISTINCT intTag FROM tblspieltag WHERE intStatus=1 OR (intStatus<>2 AND dtmStart<='$due') ORDER BY intTag");
+            $days = $this->query($liveOnly
+                ? 'SELECT DISTINCT intTag FROM tblspieltag WHERE intStatus=1 ORDER BY intTag'
+                : "SELECT DISTINCT intTag FROM tblspieltag WHERE intStatus=1 OR (intStatus<>2 AND dtmStart<='$due') ORDER BY intTag");
             while ($row = mysqli_fetch_assoc($days)) $dayNumbers[(int)$row['intTag']] = true;
             ksort($dayNumbers);
             $stats = ['schedule' => 0, 'live' => 0, 'finished' => 0];
@@ -171,8 +173,10 @@ class MatchUpdate
                 }
                 catch (Throwable $e) { $errors[] = $e->getMessage(); }
             }
-            // Also repairs totals if a previous run stopped after writing a result.
-            $this->recalculatePoints();
+            // The regular five-minute run also repairs totals after an earlier
+            // interrupted update. During ten-second live polling, persistent
+            // totals only change after a newly detected final whistle.
+            if (!$liveOnly || $stats['finished'] > 0) $this->recalculatePoints();
             return ['updated' => $stats, 'evaluated' => $stats['finished'],
                 'currentDay' => $this->advanceCompletedDay(), 'errors' => $errors];
         } finally {

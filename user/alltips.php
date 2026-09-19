@@ -43,6 +43,13 @@ foreach ($matches as &$match) {
     $match['isRunning'] = !$match['isSimulationGame'] && (int)$match['intStatus'] === 1;
 }
 unset($match);
+$hasRunningMatches = false;
+foreach ($matches as $match) {
+    if ($match['isRunning']) {
+        $hasRunningMatches = true;
+        break;
+    }
+}
 $players = mysqli_fetch_all(mysqli_query($db, 'SELECT lngIndex AS userId,strAlias,intPoint FROM tblgamer ORDER BY intPoint DESC,strAlias,lngIndex'), MYSQLI_ASSOC);
 $overallRankByUser = [];
 $previousOverallPoints = null;
@@ -113,7 +120,7 @@ $liveVersion = hash('sha256', json_encode([$day, $currentDay, $currentDayStarted
 <link rel="stylesheet" href="alltips.css?v=<?php echo (int)filemtime(__DIR__ . '/alltips.css'); ?>">
 </head><body>
 <header class="site-header">Bundesliga Tippspiel</header>
-<main data-live-version="<?php echo $liveVersion; ?>" data-current-day="<?php echo $currentDay; ?>" data-current-day-started="<?php echo $currentDayStarted ? '1' : '0'; ?>"><h1>Alle Tipps</h1>
+<main data-live-version="<?php echo $liveVersion; ?>" data-current-day="<?php echo $currentDay; ?>" data-current-day-started="<?php echo $currentDayStarted ? '1' : '0'; ?>" data-running-matches="<?php echo $hasRunningMatches ? '1' : '0'; ?>"><h1>Alle Tipps</h1>
 <div class="toolbar">
 <form method="get"><label for="day">Spieltag</label>
 <?php if ($sessionToken !== ''): ?><input type="hidden" name="user" value="<?php echo tipsEscape($sessionToken); ?>"><?php endif; ?>
@@ -177,7 +184,9 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
     var sessionToken = <?php echo json_encode($sessionToken, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
     var observedCurrentDay = <?php echo $currentDay; ?>;
     var observedCurrentDayStarted = <?php echo $currentDayStarted ? 'true' : 'false'; ?>;
+    var hasRunningMatches = <?php echo $hasRunningMatches ? 'true' : 'false'; ?>;
     var refreshing = false;
+    var refreshTimer = null;
     var simulationState = {
         phase: simulateRunning ? 'open' : 'off',
         home: 0,
@@ -290,6 +299,8 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
     });
 
     async function refreshAllTips() {
+        if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+        refreshTimer = null;
         if (refreshing || document.hidden) return;
         refreshing = true;
         var controller = new AbortController();
@@ -315,6 +326,7 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
 
             var nextCurrentDay = Number(nextMain.dataset.currentDay);
             var nextCurrentDayStarted = nextMain.dataset.currentDayStarted === '1';
+            hasRunningMatches = nextMain.dataset.runningMatches === '1';
             if (Number.isInteger(nextCurrentDay) && nextCurrentDay !== observedCurrentDay) {
                 observedCurrentDay = nextCurrentDay;
                 observedCurrentDayStarted = false;
@@ -335,6 +347,7 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
             var scrollTop = currentTable ? currentTable.scrollTop : 0;
             currentMain.innerHTML = nextMain.innerHTML;
             currentMain.dataset.liveVersion = nextMain.dataset.liveVersion;
+            currentMain.dataset.runningMatches = nextMain.dataset.runningMatches;
             var nextTable = currentMain.querySelector('.table-scroll');
             if (nextTable) {
                 nextTable.scrollLeft = scrollLeft;
@@ -346,15 +359,22 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
         } finally {
             window.clearTimeout(timeout);
             refreshing = false;
+            if (!document.hidden) scheduleRefresh();
         }
     }
 
-    window.setInterval(refreshAllTips, 30000);
+    function scheduleRefresh() {
+        if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+        var running = hasRunningMatches || simulationState.phase === 'running';
+        refreshTimer = window.setTimeout(refreshAllTips, running ? 10000 : 30000);
+    }
+
     window.addEventListener('focus', refreshAllTips);
     document.addEventListener('visibilitychange', function () {
         if (!document.hidden) refreshAllTips();
     });
     renderSimulation();
+    scheduleRefresh();
 }());
 </script>
 </body></html>

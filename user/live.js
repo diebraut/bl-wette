@@ -2,7 +2,8 @@
     'use strict';
     if (window.blLiveStarted || !window.blLiveConfig) return;
     window.blLiveStarted = true;
-    var config = window.blLiveConfig, stopped = false, version = '', deferred = false;
+    var config = window.blLiveConfig, stopped = false, version = '', deferred = false,
+        running = config.running === true;
     function replaceContents(target, source) {
         if (target && target.contains(document.activeElement)) { deferred = true; return; }
         if (!target || !source || target.querySelector('input,select,textarea,form') ||
@@ -12,6 +13,7 @@
     }
     function update(result) {
         if (stopped) return;
+        running = result.running === true;
         if (result.changed === false) return;
         deferred = false;
         var nextDay = Number(result.currentDay);
@@ -78,9 +80,9 @@
                 document.getElementById('live-status').textContent = 'Aktualisierung derzeit nicht möglich – erneuter Versuch in einer Minute.';
             } finally { clearTimeout(deadline); }
         }
-        if (!stopped) setTimeout(refresh, 60000);
+        if (!stopped) setTimeout(refresh, running ? 10000 : 60000);
     }
     // Only a confirmed matchday advancement triggers navigation; no synthetic activity.
-    setTimeout(refresh, 60000);
+    setTimeout(refresh, running ? 10000 : 60000);
     window.addEventListener('pagehide', function () { stopped = true; });
 }());
