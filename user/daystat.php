@@ -228,6 +228,8 @@ $diff = $pointtendenz + $pointdif;
 					}
 					else
 					{
+					$rgoal1 = "-";
+					$rgoal2 = "-";
 					//SBE hier weitermachen für im vorraustippen
 					?>
 					<tr>
