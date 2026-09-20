@@ -5,8 +5,18 @@
 		$_GET  = $HTTP_GET_VARS;
 	include_once("../common/include.php");
 	$db=mysqli_connect("$address", "$dbuser", "$dbpasswd",'bl_wette');
-	$user = $_GET['user'];
-	$day = $_GET['day'];
+	$user = max(1, (int)($_GET['user'] ?? 0));
+	$day = max(1, min((int)CONST_NUMBER_OF_MATCH_DAYS, (int)($_GET['day'] ?? 0)));
+	$sessionToken = $_GET['session'] ?? '';
+	if (!is_string($sessionToken) || !preg_match('/^[a-zA-Z0-9]{1,128}$/D', $sessionToken)) {
+		http_response_code(403); echo 'Sitzung abgelaufen.'; exit;
+	}
+	$sessionStatement = mysqli_prepare($db, 'SELECT intUser FROM tblsession WHERE strSessionid=?');
+	mysqli_stmt_bind_param($sessionStatement, 's', $sessionToken);
+	mysqli_stmt_execute($sessionStatement);
+	$sessionRow = mysqli_fetch_assoc(mysqli_stmt_get_result($sessionStatement));
+	if (!$sessionRow) { http_response_code(403); echo 'Sitzung abgelaufen.'; exit; }
+	$viewerUser = (int)$sessionRow['intUser'];
 	
 	/*$SQL = "SELECT w.lngIndex as tippid, s.lngIndex, s.intStatus, v1.strName as Team1, v2.strName as Team2, s.intGoal1 as rg1, s.intGoal2 as rg2, w.intGoal1 as myg1, w.intGoal2 as myg2,".
 			"(IF(".
@@ -27,7 +37,7 @@ $top = $pointtendenz + $pointdif + $pointhomegoal + $pointguestgoal;
 $home = $pointtendenz + $pointhomegoal;
 $guest = $pointtendenz + $pointguestgoal;
 $diff = $pointtendenz + $pointdif;
-	$SQL = "SELECT w.lngIndex as tippid, s.lngIndex, s.intStatus, v1.strName as Team1, v2.strName as Team2, s.intGoal1 as rg1, s.intGoal2 as rg2, w.intGoal1 as myg1, w.intGoal2 as myg2,
+	$SQL = "SELECT w.lngIndex as tippid, s.lngIndex, s.intStatus, s.dtmStart, v1.strName as Team1, v2.strName as Team2, s.intGoal1 as rg1, s.intGoal2 as rg2, w.intGoal1 as myg1, w.intGoal2 as myg2,
 					IF(
 					      w.intGoal1 IS NOT NULL AND w.intGoal2 IS NOT NULL,
 					      IF
@@ -106,6 +116,9 @@ $diff = $pointtendenz + $pointdif;
 				$style = "secondline";
 
 				$status = mysql_result($result,$i, "intStatus");
+				$matchStart = mysql_result($result,$i, "dtmStart");
+				$tipVisible = $user === $viewerUser || (int)$status >= 1
+					|| ($matchStart && strtotime($matchStart) <= time());
 				
 				if($i%2)
 					$style = "firstline";
@@ -119,6 +132,13 @@ $diff = $pointtendenz + $pointdif;
 					$point="-";
 					$abs1 = "-";
 					$abs2 = "-";
+					$classname = "failedline";
+				}
+				if(!$tipVisible)
+				{
+					$goal1 = "-";
+					$goal2 = "-";
+					$point = "-";
 					$classname = "failedline";
 				}
 

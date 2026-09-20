@@ -24,9 +24,9 @@ if (is_file($localSessionConfig)) {
                 <script language="JavaScript1.2"/>
                 
                         var old1,old2;
-                        function openuser(userid, dayid)
+                        function openuser(userid, dayid, sessionid)
                         {
-                                var strURL="usertip.php?user=" + userid + "&day=" + dayid;
+                                var strURL="usertip.php?user=" + userid + "&day=" + dayid + "&session=" + encodeURIComponent(sessionid || "");
                                 window.open(strURL, "", "width=454, height=280");
                         }
                         function openall(dayid, userid)

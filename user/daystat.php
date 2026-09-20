@@ -299,7 +299,7 @@ $diff = $pointtendenz + $pointdif;
 					    }
 					    else{
 					    ?>
-					    	<tr onmouseover="this.style.cursor='pointer';this.style.backgroundColor='lightyellow'" onmouseout="this.style.backgroundColor=''" class="<?php echo $classname?>" onclick="openuser(<?php echo  mysql_result($dayres, $i, "USERID")?>,<?php echo $actDay?>)">
+						<tr onmouseover="this.style.cursor='pointer';this.style.backgroundColor='lightyellow'" onmouseout="this.style.backgroundColor=''" class="<?php echo $classname?>" onclick='openuser(<?php echo (int)mysql_result($dayres, $i, "USERID")?>,<?php echo (int)$actDay?>,<?php echo json_encode($session, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)?>)'>
 					    		<td class="<?php echo $classname?>">
 					    			<?php echo mysql_result($dayres,$i, "USER")?>
 					    		</td>
