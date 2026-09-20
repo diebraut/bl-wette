@@ -13,6 +13,9 @@ Protokoll: `bl-wette-match-update.log` im PHP-Verzeichnis `sys_get_temp_dir()`.
 
 - Den aktuellen und den nächsten Spieltag bei jedem Lauf prüfen; dadurch werden
   auch nachträglich geänderte Anstoßtermine von OpenLigaDB übernommen.
+- Einmal täglich die veröffentlichten Anstoßtermine der gesamten Saison mit
+  einem einzigen OpenLigaDB-Aufruf abgleichen. Dadurch zeigt die Spieltag-Auswahl
+  auch bereits terminierte spätere Spieltage korrekt an.
 - Ab dem aktuell gemeldeten Anstoß eine Begegnung als laufend markieren und den
   Zwischenstand aus der OpenLigaDB-Torfolge bzw. dem aktuellen Ergebnis speichern.
 - Solange mindestens eine Begegnung läuft, OpenLigaDB innerhalb desselben

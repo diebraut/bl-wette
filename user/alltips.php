@@ -5,7 +5,22 @@ require __DIR__ . '/../common/include.php';
 $db = mysqli_connect(HOST, DB_USER, DB_PASSWD, DB_NAME);
 mysqli_set_charset($db, 'utf8mb4');
 function tipsEscape($v) { return htmlspecialchars((string)$v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
-$days = array_column(mysqli_fetch_all(mysqli_query($db, 'SELECT DISTINCT intTag FROM tblspieltag ORDER BY intTag'), MYSQLI_ASSOC), 'intTag');
+function tipsFormatDayDate($date, $withYear = true) {
+    $timestamp = strtotime($date);
+    if ($timestamp === false) return '';
+    $weekdays = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+    return $weekdays[(int)date('w', $timestamp)] . ' ' . date($withYear ? 'd.m.y' : 'd.m.', $timestamp);
+}
+function tipsDayDateText($option) {
+    $firstRaw = $option['firstDate'] ?? '';
+    $lastRaw = $option['lastDate'] ?? '';
+    if ($firstRaw === '') return 'Termin offen';
+    if ($firstRaw === $lastRaw || $lastRaw === '') return tipsFormatDayDate($firstRaw);
+    $sameYear = date('Y', strtotime($firstRaw)) === date('Y', strtotime($lastRaw));
+    return tipsFormatDayDate($firstRaw, !$sameYear) . ' – ' . tipsFormatDayDate($lastRaw);
+}
+$dayOptions = mysqli_fetch_all(mysqli_query($db, 'SELECT intTag,DATE(MIN(dtmStart)) AS firstDate,DATE(MAX(dtmStart)) AS lastDate FROM tblspieltag GROUP BY intTag ORDER BY intTag'), MYSQLI_ASSOC);
+$days = array_column($dayOptions, 'intTag');
 $info = mysqli_fetch_assoc(mysqli_query($db, 'SELECT intDay FROM tblinfo LIMIT 1'));
 $currentDay = (int)($info['intDay'] ?? 1);
 $currentDayStarted = (int)mysqli_fetch_row(mysqli_query($db,
@@ -25,6 +40,7 @@ $simulateRunning = ($_GET['simulate'] ?? '') === 'running';
 $day = (int)($_GET['day'] ?? ($simulateRunning ? 4 : ($info['intDay'] ?? 1)));
 if (!in_array($day, array_map('intval', $days), true)) $day = (int)($info['intDay'] ?? ($days[0] ?? 1));
 $matches = mysqli_fetch_all(mysqli_query($db, "SELECT s.lngIndex AS gameId,s.intStatus,s.intGoal1,s.intGoal2,s.dtmStart,
+    s.intVerein1 AS team1Id,s.intVerein2 AS team2Id,
     v1.strName AS team1,v2.strName AS team2 FROM tblspieltag s
     LEFT JOIN tblverein v1 ON v1.lngIndex=s.intVerein1 LEFT JOIN tblverein v2 ON v2.lngIndex=s.intVerein2
     WHERE s.intTag=$day ORDER BY s.dtmStart IS NULL,s.dtmStart,s.lngIndex"), MYSQLI_ASSOC);
@@ -81,6 +97,24 @@ usort($players, function ($a, $b) use ($dayPoints) {
     return $byTotal !== 0 ? $byTotal : strcmp($a['strAlias'], $b['strAlias']);
 });
 $now = date('Y-m-d H:i:s');
+$upcomingByTeam = [];
+$displayedGameIds = array_map(function ($match) { return (int)$match['gameId']; }, $matches);
+$displayedGameFilter = $displayedGameIds ? ' AND s.lngIndex NOT IN (' . implode(',', $displayedGameIds) . ')' : '';
+$upcomingRows = mysqli_query($db, "SELECT s.intTag,s.dtmStart,s.intVerein1 AS team1Id,s.intVerein2 AS team2Id,
+    v1.strName AS team1,v2.strName AS team2 FROM tblspieltag s
+    LEFT JOIN tblverein v1 ON v1.lngIndex=s.intVerein1 LEFT JOIN tblverein v2 ON v2.lngIndex=s.intVerein2
+    WHERE s.intStatus<>2 AND s.dtmStart>='$now'$displayedGameFilter ORDER BY s.dtmStart,s.lngIndex");
+while ($fixture = mysqli_fetch_assoc($upcomingRows)) {
+    $startTimestamp = strtotime($fixture['dtmStart']);
+    $when = $startTimestamp === false ? 'Termin offen'
+        : tipsFormatDayDate(date('Y-m-d', $startTimestamp)) . ', ' . date('H:i', $startTimestamp);
+    $homeId = (int)$fixture['team1Id'];
+    $awayId = (int)$fixture['team2Id'];
+    $upcomingByTeam[$homeId][] = ['side' => 'H', 'opponent' => $fixture['team2'],
+        'day' => (int)$fixture['intTag'], 'when' => $when];
+    $upcomingByTeam[$awayId][] = ['side' => 'A', 'opponent' => $fixture['team1'],
+        'day' => (int)$fixture['intTag'], 'when' => $when];
+}
 $weekdays = ['So','Mo','Di','Mi','Do','Fr','Sa'];
 $dayStarted = false;
 foreach ($matches as $match) { if ((int)$match['intStatus'] >= 1 || $match['isRunning']) $dayStarted = true; }
@@ -122,13 +156,22 @@ $liveVersion = hash('sha256', json_encode([$day, $currentDay, $currentDayStarted
 <header class="site-header">Bundesliga Tippspiel</header>
 <main data-live-version="<?php echo $liveVersion; ?>" data-current-day="<?php echo $currentDay; ?>" data-current-day-started="<?php echo $currentDayStarted ? '1' : '0'; ?>" data-running-matches="<?php echo $hasRunningMatches ? '1' : '0'; ?>"><h1>Alle Tipps</h1>
 <div class="toolbar">
-<form method="get"><label for="day">Spieltag</label>
-<?php if ($sessionToken !== ''): ?><input type="hidden" name="user" value="<?php echo tipsEscape($sessionToken); ?>"><?php endif; ?>
-<?php if ($simulateRunning): ?><input type="hidden" name="simulate" value="running"><?php endif; ?>
-<select name="day" id="day" onchange="this.form.submit()">
-<?php foreach ($days as $option): ?>
-<option value="<?php echo (int)$option; ?>" <?php if ((int)$option === $day) echo 'selected'; ?>><?php echo (int)$option; ?></option>
-<?php endforeach; ?></select><noscript><button>Anzeigen</button></noscript></form>
+<div class="day-picker-control"><span class="day-picker-label">Spieltag</span>
+<details class="day-picker"><summary><?php
+    $selectedDateText = 'Termin offen';
+    foreach ($dayOptions as $option) {
+        if ((int)$option['intTag'] === $day) $selectedDateText = tipsDayDateText($option);
+    }
+?><span class="day-number"><?php echo $day; ?></span><span class="day-date">(<?php echo tipsEscape($selectedDateText); ?>)</span></summary>
+<div class="day-options" role="listbox" aria-label="Spieltag auswählen">
+<?php foreach ($dayOptions as $option):
+    $optionDay = (int)$option['intTag'];
+    $optionParams = ['day' => $optionDay];
+    if ($sessionToken !== '') $optionParams['user'] = $sessionToken;
+    if ($simulateRunning) $optionParams['simulate'] = 'running';
+    $optionUrl = 'alltips.php?' . http_build_query($optionParams, '', '&', PHP_QUERY_RFC3986); ?>
+<a href="<?php echo tipsEscape($optionUrl); ?>" role="option" aria-selected="<?php echo $optionDay === $day ? 'true' : 'false'; ?>"><span class="day-number"><?php echo $optionDay; ?></span><span class="day-date">(<?php echo tipsEscape(tipsDayDateText($option)); ?>)</span></a>
+<?php endforeach; ?></div></details></div>
 <span>Sortiert nach Spieltag-Punkten</span>
 <?php if ($simulateRunning): ?><div class="simulation-controls" aria-label="Spielsimulation">
 <button type="button" data-simulation-action="start">Spiel beginnen</button>
@@ -143,8 +186,8 @@ $liveVersion = hash('sha256', json_encode([$day, $currentDay, $currentDayStarted
 <th scope="col" rowspan="2">Rang</th><th scope="col" rowspan="2" class="player">Spieler</th>
 <th scope="col" rowspan="2" class="day-points" aria-sort="descending">Spieltag-<br>Punkte ↓</th>
 <?php foreach ($matches as $match): $start = !empty($match['dtmStart']) ? strtotime($match['dtmStart']) : false; ?>
-<th scope="col" class="match<?php echo $match['isSimulationGame'] ? ' simulation-game' : ''; ?><?php echo $match['isRunning'] ? ' running-game' : ''; ?>"><span><?php echo tipsEscape($match['team1']); ?></span><span class="versus">–</span>
-<span><?php echo tipsEscape($match['team2']); ?></span>
+<th scope="col" class="match<?php echo $match['isSimulationGame'] ? ' simulation-game' : ''; ?><?php echo $match['isRunning'] ? ' running-game' : ''; ?>"><span><button type="button" class="club-name" aria-haspopup="listbox" aria-expanded="false" data-club-name="<?php echo tipsEscape($match['team1']); ?>" data-club-fixtures="<?php echo tipsEscape(json_encode($upcomingByTeam[(int)$match['team1Id']] ?? [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)); ?>"><?php echo tipsEscape($match['team1']); ?></button></span><span class="versus">–</span>
+<span><button type="button" class="club-name" aria-haspopup="listbox" aria-expanded="false" data-club-name="<?php echo tipsEscape($match['team2']); ?>" data-club-fixtures="<?php echo tipsEscape(json_encode($upcomingByTeam[(int)$match['team2Id']] ?? [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)); ?>"><?php echo tipsEscape($match['team2']); ?></button></span>
 <small><?php echo $start ? tipsEscape($weekdays[(int)date('w',$start)] . ' ' . date('d.m. H:i',$start)) : 'Termin offen'; ?></small></th>
 <?php endforeach; ?></tr><tr class="results">
 <?php foreach ($matches as $match): ?>
@@ -176,6 +219,9 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
 <footer><p><strong>Spieltag-Punkte:</strong> aktuelle Punkte aus laufenden und beendeten Begegnungen.</p>
 <p>-:- Kein Tipp · Verdeckt: Freigabe nach Anpfiff · Grün: Punkte erzielt</p></footer>
 </main>
+<div id="club-fixture-popup" class="club-fixture-popup" role="dialog" aria-modal="false" aria-labelledby="club-fixture-title" hidden>
+<strong id="club-fixture-title"></strong><div class="club-fixture-options" role="listbox" aria-label="Nächste Partien"></div>
+</div>
 <script>
 (function () {
     'use strict';
@@ -192,6 +238,8 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
         home: 0,
         away: 0
     };
+    var activeClubFixtures = [];
+    var visibleClubFixtureCount = 10;
 
     function simulatedTipPoints(tipHome, tipAway) {
         var resultDifference = simulationState.home - simulationState.away;
@@ -280,7 +328,98 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
         updateSimulatedRanking();
     }
 
+    function closeClubFixtures(returnFocus) {
+        var popup = document.getElementById('club-fixture-popup');
+        var opener = document.querySelector('.club-name[aria-expanded="true"]');
+        if (popup) popup.hidden = true;
+        document.querySelectorAll('.club-name[aria-expanded="true"]').forEach(function (button) {
+            button.setAttribute('aria-expanded', 'false');
+        });
+        if (returnFocus && opener) opener.focus();
+    }
+
+    function renderClubFixtures() {
+        var popup = document.getElementById('club-fixture-popup');
+        if (!popup) return;
+        var options = popup.querySelector('.club-fixture-options');
+        options.replaceChildren();
+        if (!activeClubFixtures.length) {
+            var empty = document.createElement('div');
+            empty.className = 'club-fixture-empty';
+            empty.textContent = 'Keine weiteren Partien vorhanden.';
+            options.appendChild(empty);
+            return;
+        }
+        activeClubFixtures.slice(0, visibleClubFixtureCount).forEach(function (fixture) {
+            var option = document.createElement('div');
+            option.className = 'club-fixture-option';
+            option.setAttribute('role', 'option');
+            option.tabIndex = -1;
+            var opponent = document.createElement('span');
+            opponent.className = 'club-fixture-opponent';
+            opponent.textContent = fixture.side + ' ' + fixture.opponent;
+            var details = document.createElement('small');
+            details.textContent = fixture.day + '. Spieltag · ' + fixture.when;
+            option.append(opponent, details);
+            options.appendChild(option);
+        });
+        if (visibleClubFixtureCount < activeClubFixtures.length) {
+            var more = document.createElement('button');
+            more.type = 'button';
+            more.className = 'club-fixture-more';
+            more.textContent = 'Weitere Partien';
+            options.appendChild(more);
+        }
+    }
+
+    function openClubFixtures(button) {
+        var popup = document.getElementById('club-fixture-popup');
+        if (!popup) return;
+        closeClubFixtures(false);
+        try { activeClubFixtures = JSON.parse(button.dataset.clubFixtures || '[]'); }
+        catch (error) { activeClubFixtures = []; }
+        visibleClubFixtureCount = 10;
+        var title = popup.querySelector('#club-fixture-title');
+        title.textContent = 'Nächste Partien: ' + (button.dataset.clubName || button.textContent.trim());
+        renderClubFixtures();
+        popup.hidden = false;
+        button.setAttribute('aria-expanded', 'true');
+        var rect = button.getBoundingClientRect();
+        var popupRect = popup.getBoundingClientRect();
+        var pageZoom = parseFloat(window.getComputedStyle(document.body).zoom) || 1;
+        var gap = 8;
+        var left = rect.right + gap;
+        if (left + popupRect.width > window.innerWidth - gap) {
+            left = rect.left - popupRect.width - gap;
+        }
+        left = Math.max(gap, Math.min(left, window.innerWidth - popupRect.width - gap));
+        var top = Math.max(gap, Math.min(rect.top, window.innerHeight - popupRect.height - gap));
+        popup.style.left = (left / pageZoom) + 'px';
+        popup.style.top = (top / pageZoom) + 'px';
+    }
+
     document.addEventListener('click', function (event) {
+        var dayPicker = document.querySelector('.day-picker[open]');
+        if (dayPicker && !dayPicker.contains(event.target)) dayPicker.removeAttribute('open');
+
+        var clubButton = event.target.closest('.club-name');
+        if (clubButton) {
+            if (clubButton.getAttribute('aria-expanded') === 'true') closeClubFixtures(false);
+            else openClubFixtures(clubButton);
+            return;
+        }
+        var moreFixtures = event.target.closest('.club-fixture-more');
+        if (moreFixtures) {
+            var firstNewFixture = visibleClubFixtureCount;
+            visibleClubFixtureCount = Math.min(visibleClubFixtureCount + 10, activeClubFixtures.length);
+            renderClubFixtures();
+            var displayedFixtures = document.querySelectorAll('.club-fixture-option');
+            if (displayedFixtures[firstNewFixture]) displayedFixtures[firstNewFixture].focus();
+            return;
+        }
+        var fixturePopup = document.getElementById('club-fixture-popup');
+        if (fixturePopup && !fixturePopup.hidden && !fixturePopup.contains(event.target)) closeClubFixtures(false);
+
         var button = event.target.closest('[data-simulation-action]');
         if (!button) return;
         var action = button.dataset.simulationAction;
@@ -297,6 +436,26 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
         }
         renderSimulation();
     });
+
+    document.addEventListener('keydown', function (event) {
+        if (event.key !== 'Escape') return;
+        var dayPicker = document.querySelector('.day-picker[open]');
+        var fixturePopup = document.getElementById('club-fixture-popup');
+        var handled = false;
+        if (dayPicker) {
+            dayPicker.removeAttribute('open');
+            var summary = dayPicker.querySelector('summary');
+            if (summary) summary.focus();
+            handled = true;
+        }
+        if (fixturePopup && !fixturePopup.hidden) {
+            closeClubFixtures(true);
+            handled = true;
+        }
+        if (handled) event.preventDefault();
+    });
+
+    window.addEventListener('resize', function () { closeClubFixtures(false); });
 
     async function refreshAllTips() {
         if (refreshTimer !== null) window.clearTimeout(refreshTimer);
@@ -345,6 +504,7 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
             var currentTable = currentMain.querySelector('.table-scroll');
             var scrollLeft = currentTable ? currentTable.scrollLeft : 0;
             var scrollTop = currentTable ? currentTable.scrollTop : 0;
+            closeClubFixtures(false);
             currentMain.innerHTML = nextMain.innerHTML;
             currentMain.dataset.liveVersion = nextMain.dataset.liveVersion;
             currentMain.dataset.runningMatches = nextMain.dataset.runningMatches;

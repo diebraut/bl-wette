@@ -4,10 +4,12 @@ class MatchUpdate
 {
     private $db;
     private $fetch;
+    private $fetchSchedule;
 
     public function __construct($db, $fetch = null)
     {
         $this->db = $db;
+        $useOpenLigaDb = $fetch === null;
         $this->fetch = $fetch ?: function ($day) {
             $ch = curl_init('https://api.openligadb.de/getmatchdata/' . CONST_LIGA . '/' . CONST_LIGA_SEASON . '/' . (int)$day);
             curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 5,
@@ -21,6 +23,19 @@ class MatchUpdate
             }
             return $data;
         };
+        $this->fetchSchedule = $useOpenLigaDb ? function () {
+            $ch = curl_init('https://api.openligadb.de/getmatchdata/' . CONST_LIGA . '/' . CONST_LIGA_SEASON);
+            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 5,
+                CURLOPT_TIMEOUT => 20, CURLOPT_USERAGENT => 'bl-wette schedule updater']);
+            $body = curl_exec($ch);
+            $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            $data = is_string($body) ? json_decode($body, true) : null;
+            if ($status !== 200 || !is_array($data) || !$data) {
+                throw new RuntimeException('OpenLigaDB: keine gueltigen Saisontermine');
+            }
+            return $data;
+        } : null;
     }
 
     private function query($sql)
@@ -111,6 +126,28 @@ class MatchUpdate
         return $stats;
     }
 
+    private function refreshSeasonSchedule($currentDay)
+    {
+        if ($this->fetchSchedule === null) return 0;
+        $matches = call_user_func($this->fetchSchedule);
+        $updated = 0;
+        foreach ($matches as $match) {
+            $day = (int)($match['group']['groupOrderID'] ?? 0);
+            $id = (int)($match['matchID'] ?? 0);
+            if ($day < $currentDay || $day > (int)CONST_NUMBER_OF_MATCH_DAYS || $id <= 0) continue;
+            $start = self::matchStart($match);
+            if ($start === null) continue;
+            $row = mysqli_fetch_assoc($this->query("SELECT lngIndex,dtmStart FROM tblspieltag WHERE intTag=$day AND intMatchIdFromOpenLigaDB=$id"));
+            if (!$row) continue;
+            $startSql = $start->format('Y-m-d H:i:s');
+            if (($row['dtmStart'] ?? null) === $startSql) continue;
+            $pk = (int)$row['lngIndex'];
+            $this->query("UPDATE tblspieltag SET dtmStart='$startSql' WHERE lngIndex=$pk");
+            $updated++;
+        }
+        return $updated;
+    }
+
     public function recalculatePoints()
     {
         // Absolute totals: repeat runs and crash recovery never add points twice.
@@ -165,6 +202,18 @@ class MatchUpdate
             ksort($dayNumbers);
             $stats = ['schedule' => 0, 'live' => 0, 'finished' => 0];
             $errors = [];
+            if (!$liveOnly && $this->fetchSchedule !== null) {
+                $scheduleStamp = sys_get_temp_dir() . '/bl-wette-schedule-' . sha1(DB_NAME) . '.date';
+                $today = $now->format('Y-m-d');
+                if (@file_get_contents($scheduleStamp) !== $today) {
+                    try {
+                        $stats['schedule'] += $this->refreshSeasonSchedule($currentDay);
+                        @file_put_contents($scheduleStamp, $today, LOCK_EX);
+                    } catch (Throwable $e) {
+                        $errors[] = $e->getMessage();
+                    }
+                }
+            }
             foreach (array_keys($dayNumbers) as $day) {
                 if ($day < 1 || $day > (int)CONST_NUMBER_OF_MATCH_DAYS) continue;
                 try {
