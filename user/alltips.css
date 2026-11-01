@@ -88,3 +88,75 @@ footer { display: flex; gap: 16px; flex-wrap: wrap; justify-content: space-betwe
     .match span { overflow-wrap: normal; }
 }
 @media print { @page { size: landscape; } .toolbar { display: none; } main { padding: 8px; } .table-scroll { overflow: visible; } table { min-width: 0; font-size: 10px; } .match, .player, .day-points { min-width: 0; } th, td { padding: 7px 4px; } tbody td { font-size: 11px; } .match small { white-space: normal; } }
+
+/* Keep the rank column compact; the heading reads from top to bottom. */
+th.rank-column, td.rank-value {
+    width: 1%;
+    padding-left: 0.2em;
+    padding-right: 0.2em;
+    white-space: nowrap;
+}
+.rank-label, .vertical-label {
+    display: inline-block;
+    writing-mode: vertical-rl;
+    text-orientation: upright;
+    line-height: 1;
+    letter-spacing: 0.04em;
+}
+
+thead th.vertical-heading {
+    text-align: center;
+    vertical-align: middle;
+}
+thead th.day-points.vertical-heading, tbody td.day-points {
+    width: 1%;
+    padding-left: 0.2em;
+    padding-right: 0.2em;
+    white-space: nowrap;
+}
+
+/* Keep the first three columns together when scrolling across the matches. */
+@media screen {
+    .rank-column, .rank-value, .player, .day-points {
+        position: sticky;
+        z-index: 2;
+    }
+    .rank-column, .rank-value { left: 0; }
+    .player { left: var(--rank-column-width, 0px); }
+    .day-points {
+        left: calc(var(--rank-column-width, 0px) + var(--player-column-width, 0px));
+        box-shadow: 2px 0 0 #6e927a;
+    }
+    tbody .rank-value { background: #202723; }
+    tbody tr:nth-child(even) .rank-value { background: #28312c; }
+    thead .rank-column { background: #303a34; }
+    thead .rank-column, thead .player, thead .day-points { z-index: 3; }
+}
+
+/* Scroll player rows inside the table while the complete heading stays visible. */
+@media screen {
+    .table-scroll {
+        max-height: var(--table-scroll-height, 75vh);
+        overflow: auto;
+        scrollbar-gutter: stable;
+    }
+    thead {
+        position: sticky;
+        top: 0;
+        z-index: 5;
+    }
+}
+
+/* This spacer stays inside the table so the sticky heading remains pinned
+   while even a short player list can scroll completely out of view. */
+@media screen {
+    .scroll-tail td {
+        height: var(--table-scroll-tail-height, 0px);
+        padding: 0;
+        border: 0;
+        line-height: 0;
+        font-size: 0;
+        background: #171c19;
+    }
+}
+@media print { .scroll-tail { display: none; } }

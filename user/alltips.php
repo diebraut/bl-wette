@@ -183,8 +183,8 @@ $liveVersion = hash('sha256', json_encode([$day, $currentDay, $currentDayStarted
 </div>
 <div class="table-scroll" role="region" aria-label="Tipps aller Spieler" tabindex="0"><table>
 <thead><tr>
-<th scope="col" rowspan="2">Rang</th><th scope="col" rowspan="2" class="player">Spieler</th>
-<th scope="col" rowspan="2" class="day-points" aria-sort="descending">Spieltag-<br>Punkte ↓</th>
+<th scope="col" rowspan="2" class="rank-column"><span class="rank-label">Rang</span></th><th scope="col" rowspan="2" class="player vertical-heading"><span class="vertical-label">Spieler</span></th>
+<th scope="col" rowspan="2" class="day-points vertical-heading" aria-sort="descending"><span class="vertical-label">Punkte</span></th>
 <?php foreach ($matches as $match): $start = !empty($match['dtmStart']) ? strtotime($match['dtmStart']) : false; ?>
 <th scope="col" class="match<?php echo $match['isSimulationGame'] ? ' simulation-game' : ''; ?><?php echo $match['isRunning'] ? ' running-game' : ''; ?>"><span><button type="button" class="club-name" aria-haspopup="listbox" aria-expanded="false" data-club-name="<?php echo tipsEscape($match['team1']); ?>" data-club-fixtures="<?php echo tipsEscape(json_encode($upcomingByTeam[(int)$match['team1Id']] ?? [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)); ?>"><?php echo tipsEscape($match['team1']); ?></button></span><span class="versus">–</span>
 <span><button type="button" class="club-name" aria-haspopup="listbox" aria-expanded="false" data-club-name="<?php echo tipsEscape($match['team2']); ?>" data-club-fixtures="<?php echo tipsEscape(json_encode($upcomingByTeam[(int)$match['team2Id']] ?? [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)); ?>"><?php echo tipsEscape($match['team2']); ?></button></span>
@@ -214,7 +214,7 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
 <span class="<?php echo $visible && $points > 0 ? 'scored scored-' . min(4, $points) : ''; ?>"><?php echo !$visible ? 'Verdeckt' : ($hasTip ? (int)$tip['intGoal1'] . ':' . (int)$tip['intGoal2'] : '-:-'); ?><?php if ($visible && $hasTip && $points > 0) echo ' (' . $points . ')'; ?></span></td>
 <?php endforeach; ?></tr><?php endforeach; ?>
 <?php if (!$players): ?><tr><td colspan="<?php echo 3 + count($matches); ?>">Noch keine Spieler vorhanden.</td></tr><?php endif; ?>
-</tbody></table></div>
+</tbody><tfoot class="scroll-tail" aria-hidden="true"><tr><td colspan="<?php echo 3 + count($matches); ?>"></td></tr></tfoot></table></div>
 <?php if (!$matches): ?><p>Für diesen Spieltag sind noch keine Paarungen vorhanden.</p><?php endif; ?>
 <footer><p><strong>Spieltag-Punkte:</strong> aktuelle Punkte aus laufenden und beendeten Begegnungen.</p>
 <p>-:- Kein Tipp · Verdeckt: Freigabe nach Anpfiff · Grün: Punkte erzielt</p></footer>
@@ -238,6 +238,162 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
         home: 0,
         away: 0
     };
+    var stickyColumnObserver = null;
+
+    function updateStickyColumns() {
+        var table = document.querySelector('.table-scroll table');
+        if (!table) return;
+        var rankHeader = table.querySelector('thead .rank-column');
+        var playerHeader = table.querySelector('thead .player');
+        if (!rankHeader || !playerHeader) return;
+        // offsetWidth uses layout pixels, so body zoom does not skew the offsets.
+        table.style.setProperty('--rank-column-width', rankHeader.offsetWidth + 'px');
+        table.style.setProperty('--player-column-width', playerHeader.offsetWidth + 'px');
+        var scrollArea = table.closest('.table-scroll');
+        var footer = document.querySelector('main footer');
+        var zoom = parseFloat(window.getComputedStyle(document.body).zoom) || 1;
+        var footerHeight = footer ? footer.getBoundingClientRect().height : 0;
+        var availableHeight = window.innerHeight - scrollArea.getBoundingClientRect().top
+            - footerHeight - 32 * zoom;
+        var viewportHeight = Math.max(120, availableHeight) / zoom;
+        scrollArea.style.setProperty('--table-scroll-height', viewportHeight + 'px');
+        // Keep enough space after the last player to scroll every row behind the heading.
+        var headingHeight = table.tHead ? table.tHead.offsetHeight : 0;
+        scrollArea.style.setProperty('--table-scroll-tail-height', Math.max(0, viewportHeight - headingHeight) + 'px');
+    }
+
+    function setupDirectionalScrolling() {
+        var scrollArea = document.querySelector('.table-scroll');
+        if (!scrollArea || scrollArea.dataset.axisScrollBound === '1') return;
+        scrollArea.dataset.axisScrollBound = '1';
+        var lockedAxis = null;
+        var lastWheelAt = -Infinity;
+        var momentumFrame = null;
+        function stopTouchMomentum() {
+            if (momentumFrame !== null) window.cancelAnimationFrame(momentumFrame);
+            momentumFrame = null;
+        }
+        function startTouchMomentum(axis, velocity) {
+            stopTouchMomentum();
+            if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+            var zoom = parseFloat(window.getComputedStyle(document.body).zoom) || 1;
+            velocity = Math.max(-2.5 / zoom, Math.min(2.5 / zoom, velocity));
+            if (Math.abs(velocity) < 0.05) return;
+            var lastFrameAt = performance.now();
+            var decayTime = 240;
+            function coast(now) {
+                momentumFrame = null;
+                if (!scrollArea.isConnected || document.hidden) return;
+                var elapsed = Math.min(48, Math.max(0, now - lastFrameAt));
+                lastFrameAt = now;
+                var decay = Math.exp(-elapsed / decayTime);
+                var distance = velocity * decayTime * (1 - decay);
+                var before = axis === 'x' ? scrollArea.scrollLeft : scrollArea.scrollTop;
+                if (axis === 'x') scrollArea.scrollLeft += distance;
+                else scrollArea.scrollTop += distance;
+                var after = axis === 'x' ? scrollArea.scrollLeft : scrollArea.scrollTop;
+                velocity *= decay;
+                if (after !== before && Math.abs(velocity) >= 0.02) {
+                    momentumFrame = window.requestAnimationFrame(coast);
+                }
+            }
+            momentumFrame = window.requestAnimationFrame(coast);
+        }
+        scrollArea.addEventListener('pointerdown', stopTouchMomentum, {passive: true});
+        scrollArea.addEventListener('keydown', stopTouchMomentum);
+
+        scrollArea.addEventListener('wheel', function (event) {
+            // Leave browser zoom and events that cannot be canceled to the browser.
+            stopTouchMomentum();
+            if (event.ctrlKey || !event.cancelable) return;
+            var dx = event.deltaX;
+            var dy = event.deltaY;
+            if (event.shiftKey && dx === 0) { dx = dy; dy = 0; }
+            if (dx === 0 && dy === 0) return;
+            var now = performance.now();
+            if (now - lastWheelAt > 200) lockedAxis = null;
+            lastWheelAt = now;
+            if (!lockedAxis) lockedAxis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+            // A gesture, including its trackpad momentum, moves along one axis only.
+            event.preventDefault();
+            var distance = lockedAxis === 'x' ? dx : dy;
+            if (event.deltaMode === 1) distance *= 24;
+            if (event.deltaMode === 2) distance *= lockedAxis === 'x'
+                ? scrollArea.clientWidth : scrollArea.clientHeight;
+            if (lockedAxis === 'x') scrollArea.scrollLeft += distance;
+            else scrollArea.scrollTop += distance;
+        }, {passive: false});
+
+        var touchGesture = null;
+        scrollArea.addEventListener('touchstart', function (event) {
+            stopTouchMomentum();
+            if (event.touches.length !== 1) { touchGesture = null; return; }
+            var touch = event.touches[0];
+            touchGesture = {
+                id: touch.identifier,
+                x: touch.clientX,
+                y: touch.clientY,
+                left: scrollArea.scrollLeft,
+                top: scrollArea.scrollTop,
+                axis: null,
+                lastAt: performance.now(),
+                lastPosition: null,
+                velocity: 0
+            };
+        }, {passive: true});
+        scrollArea.addEventListener('touchmove', function (event) {
+            if (!touchGesture || event.touches.length !== 1) { touchGesture = null; return; }
+            var touch = event.touches[0];
+            if (touch.identifier !== touchGesture.id || !event.cancelable) return;
+            // Claim single-finger movement before the browser starts a diagonal pan.
+            // Taps and multi-finger gestures remain native.
+            event.preventDefault();
+            var dx = touchGesture.x - touch.clientX;
+            var dy = touchGesture.y - touch.clientY;
+            if (!touchGesture.axis) {
+                if (Math.max(Math.abs(dx), Math.abs(dy)) < 6) return;
+                touchGesture.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+            }
+            var zoom = parseFloat(window.getComputedStyle(document.body).zoom) || 1;
+            // Freeze the other axis at its starting position for the entire swipe.
+            scrollArea.scrollLeft = touchGesture.left + (touchGesture.axis === 'x' ? dx / zoom : 0);
+            scrollArea.scrollTop = touchGesture.top + (touchGesture.axis === 'y' ? dy / zoom : 0);
+            var now = performance.now();
+            var position = touchGesture.axis === 'x' ? scrollArea.scrollLeft : scrollArea.scrollTop;
+            var previous = touchGesture.lastPosition === null
+                ? (touchGesture.axis === 'x' ? touchGesture.left : touchGesture.top) : touchGesture.lastPosition;
+            var elapsed = now - touchGesture.lastAt;
+            if (elapsed > 0) {
+                var velocity = (position - previous) / elapsed;
+                touchGesture.velocity = elapsed > 80 ? velocity : touchGesture.velocity * 0.25 + velocity * 0.75;
+            }
+            touchGesture.lastPosition = position;
+            touchGesture.lastAt = now;
+        }, {passive: false});
+        scrollArea.addEventListener('touchend', function (event) {
+            var gesture = touchGesture;
+            touchGesture = null;
+            if (gesture && gesture.axis && event.touches.length === 0
+                    && performance.now() - gesture.lastAt < 100) {
+                startTouchMomentum(gesture.axis, gesture.velocity);
+            }
+        }, {passive: true});
+        scrollArea.addEventListener('touchcancel', function () {
+            touchGesture = null;
+            stopTouchMomentum();
+        }, {passive: true});
+    }
+
+    function observeStickyColumns() {
+        if (stickyColumnObserver) stickyColumnObserver.disconnect();
+        updateStickyColumns();
+        setupDirectionalScrolling();
+        if (!window.ResizeObserver) return;
+        stickyColumnObserver = new ResizeObserver(updateStickyColumns);
+        document.querySelectorAll('.table-scroll thead .rank-column, .table-scroll thead .player')
+            .forEach(function (header) { stickyColumnObserver.observe(header); });
+    }
+
     var activeClubFixtures = [];
     var visibleClubFixtureCount = 10;
 
@@ -514,6 +670,7 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
                 nextTable.scrollTop = scrollTop;
             }
             renderSimulation();
+            observeStickyColumns();
         } catch (error) {
             if (error.name !== 'AbortError') console.warn('Alltips-Aktualisierung fehlgeschlagen:', error);
         } finally {
@@ -533,7 +690,9 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
     document.addEventListener('visibilitychange', function () {
         if (!document.hidden) refreshAllTips();
     });
+    window.addEventListener('resize', updateStickyColumns);
     renderSimulation();
+    observeStickyColumns();
     scheduleRefresh();
 }());
 </script>
