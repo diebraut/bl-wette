@@ -179,7 +179,6 @@ $liveVersion = hash('sha256', json_encode([$day, $currentDay, $currentDayStarted
 <button type="button" data-simulation-action="home-goal">Tor Heim</button>
 <button type="button" data-simulation-action="finish">Spiel beenden</button>
 </div><?php endif; ?>
-<button class="print" onclick="window.print()">Tipps drucken</button>
 </div>
 <div class="table-scroll" role="region" aria-label="Tipps aller Spieler" tabindex="0"><table>
 <thead><tr>
@@ -215,6 +214,7 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
 <?php endforeach; ?></tr><?php endforeach; ?>
 <?php if (!$players): ?><tr><td colspan="<?php echo 3 + count($matches); ?>">Noch keine Spieler vorhanden.</td></tr><?php endif; ?>
 </tbody><tfoot class="scroll-tail" aria-hidden="true"><tr><td colspan="<?php echo 3 + count($matches); ?>"></td></tr></tfoot></table></div>
+<div class="table-actions"><button type="button" class="print" onclick="window.print()">Tipps drucken</button></div>
 <?php if (!$matches): ?><p>Für diesen Spieltag sind noch keine Paarungen vorhanden.</p><?php endif; ?>
 <footer><p><strong>Spieltag-Punkte:</strong> aktuelle Punkte aus laufenden und beendeten Begegnungen.</p>
 <p>-:- Kein Tipp · Verdeckt: Freigabe nach Anpfiff · Grün: Punkte erzielt</p></footer>
@@ -239,6 +239,7 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
         away: 0
     };
     var stickyColumnObserver = null;
+    var tablePageLiftSpace = 0;
 
     function updateStickyColumns() {
         var table = document.querySelector('.table-scroll table');
@@ -250,22 +251,47 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
         table.style.setProperty('--rank-column-width', rankHeader.offsetWidth + 'px');
         table.style.setProperty('--player-column-width', playerHeader.offsetWidth + 'px');
         var scrollArea = table.closest('.table-scroll');
+        scrollArea.style.setProperty('--table-page-lift-space', tablePageLiftSpace + 'px');
         var footer = document.querySelector('main footer');
+        var tableActions = document.querySelector('.table-actions');
         var zoom = parseFloat(window.getComputedStyle(document.body).zoom) || 1;
         var footerHeight = footer ? footer.getBoundingClientRect().height : 0;
+        var actionsHeight = tableActions ? tableActions.getBoundingClientRect().height + 10 * zoom : 0;
         var availableHeight = window.innerHeight - scrollArea.getBoundingClientRect().top
-            - footerHeight - 32 * zoom;
+            - footerHeight - actionsHeight - 32 * zoom;
+        var headingHeight = table.tHead ? table.tHead.offsetHeight : 0;
+        var bodyHeight = table.tBodies.length ? table.tBodies[0].offsetHeight : 0;
+        var firstPlayerRow = table.querySelector('tbody tr[data-user-id]');
+        var emptyRowHeight = firstPlayerRow ? firstPlayerRow.offsetHeight : 32;
+        var frameHeight = Math.max(0, scrollArea.offsetHeight - scrollArea.clientHeight);
+        // Always use the available window height, also with a short player list.
+        var playerScrollTop = Math.max(0, Math.min(bodyHeight, scrollArea.scrollTop));
+        if (Math.abs(scrollArea.scrollTop - playerScrollTop) > 0.5) scrollArea.scrollTop = playerScrollTop;
         var viewportHeight = Math.max(120, availableHeight) / zoom;
         scrollArea.style.setProperty('--table-scroll-height', viewportHeight + 'px');
-        // Keep enough space after the last player to scroll every row behind the heading.
-        var headingHeight = table.tHead ? table.tHead.offsetHeight : 0;
-        scrollArea.style.setProperty('--table-scroll-tail-height', Math.max(0, viewportHeight - headingHeight) + 'px');
+        // Keep the scroll range stable so every player can still move behind the heading.
+        scrollArea.style.setProperty('--table-scroll-tail-height',
+            Math.max(emptyRowHeight, viewportHeight - headingHeight - frameHeight) + 'px');
     }
 
     function setupDirectionalScrolling() {
         var scrollArea = document.querySelector('.table-scroll');
         if (!scrollArea || scrollArea.dataset.axisScrollBound === '1') return;
         scrollArea.dataset.axisScrollBound = '1';
+        scrollArea.addEventListener('scroll', updateStickyColumns, {passive: true});
+        function isHeadingTarget(target) {
+            return !!(target && target.closest && target.closest('thead'));
+        }
+        function visiblePlayerRowCount() {
+            var heading = scrollArea.querySelector('thead');
+            var areaRect = scrollArea.getBoundingClientRect();
+            var top = Math.max(0, heading ? heading.getBoundingClientRect().bottom : areaRect.top);
+            var bottom = Math.min(window.innerHeight, areaRect.bottom);
+            return Array.from(scrollArea.querySelectorAll('tbody tr[data-user-id]')).filter(function (row) {
+                var rect = row.getBoundingClientRect();
+                return rect.top >= top - 1 && rect.bottom <= bottom + 1;
+            }).length;
+        }
         var lockedAxis = null;
         var lastWheelAt = -Infinity;
         var momentumFrame = null;
@@ -316,6 +342,7 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
             if (!lockedAxis) lockedAxis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
             // A gesture, including its trackpad momentum, moves along one axis only.
             event.preventDefault();
+            if (isHeadingTarget(event.target) && lockedAxis !== 'x') return;
             var distance = lockedAxis === 'x' ? dx : dy;
             if (event.deltaMode === 1) distance *= 24;
             if (event.deltaMode === 2) distance *= lockedAxis === 'x'
@@ -336,6 +363,10 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
                 left: scrollArea.scrollLeft,
                 top: scrollArea.scrollTop,
                 axis: null,
+                inHeading: isHeadingTarget(event.target),
+                canLiftTable: visiblePlayerRowCount() < 5 || (tablePageLiftSpace > 0 && window.scrollY > 0),
+                pageTop: window.scrollY,
+                tablePageTop: Math.max(0, scrollArea.getBoundingClientRect().top + window.scrollY),
                 lastAt: performance.now(),
                 lastPosition: null,
                 velocity: 0
@@ -355,6 +386,20 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
                 touchGesture.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
             }
             var zoom = parseFloat(window.getComputedStyle(document.body).zoom) || 1;
+            if (touchGesture.inHeading && touchGesture.axis === 'y') {
+                // Vertical heading swipes may lift the table, but never scroll player rows.
+                if (!touchGesture.canLiftTable || touchGesture.axis !== 'y') return;
+                var targetTop = Math.max(0, Math.min(touchGesture.tablePageTop, touchGesture.pageTop + dy));
+                if (targetTop > 0) {
+                    // Reserve page scroll space, even if the original page fits the window.
+                    tablePageLiftSpace = Math.max(tablePageLiftSpace, touchGesture.tablePageTop / zoom);
+                    scrollArea.style.setProperty('--table-page-lift-space', tablePageLiftSpace + 'px');
+                }
+                window.scrollTo({left: window.scrollX, top: targetTop, behavior: 'instant'});
+                if (targetTop === 0) tablePageLiftSpace = 0;
+                updateStickyColumns();
+                return;
+            }
             // Freeze the other axis at its starting position for the entire swipe.
             scrollArea.scrollLeft = touchGesture.left + (touchGesture.axis === 'x' ? dx / zoom : 0);
             scrollArea.scrollTop = touchGesture.top + (touchGesture.axis === 'y' ? dy / zoom : 0);
@@ -373,7 +418,7 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
         scrollArea.addEventListener('touchend', function (event) {
             var gesture = touchGesture;
             touchGesture = null;
-            if (gesture && gesture.axis && event.touches.length === 0
+            if (gesture && (!gesture.inHeading || gesture.axis === 'x') && gesture.axis && event.touches.length === 0
                     && performance.now() - gesture.lastAt < 100) {
                 startTouchMomentum(gesture.axis, gesture.velocity);
             }
@@ -390,7 +435,7 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
         setupDirectionalScrolling();
         if (!window.ResizeObserver) return;
         stickyColumnObserver = new ResizeObserver(updateStickyColumns);
-        document.querySelectorAll('.table-scroll thead .rank-column, .table-scroll thead .player')
+        document.querySelectorAll('.table-scroll thead .rank-column, .table-scroll thead .player, .table-scroll tbody')
             .forEach(function (header) { stickyColumnObserver.observe(header); });
     }
 
@@ -660,17 +705,21 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
             var currentTable = currentMain.querySelector('.table-scroll');
             var scrollLeft = currentTable ? currentTable.scrollLeft : 0;
             var scrollTop = currentTable ? currentTable.scrollTop : 0;
+            var pageScrollX = window.scrollX;
+            var pageScrollY = window.scrollY;
             closeClubFixtures(false);
             currentMain.innerHTML = nextMain.innerHTML;
             currentMain.dataset.liveVersion = nextMain.dataset.liveVersion;
             currentMain.dataset.runningMatches = nextMain.dataset.runningMatches;
             var nextTable = currentMain.querySelector('.table-scroll');
             if (nextTable) {
+                nextTable.style.setProperty('--table-page-lift-space', tablePageLiftSpace + 'px');
                 nextTable.scrollLeft = scrollLeft;
                 nextTable.scrollTop = scrollTop;
             }
             renderSimulation();
             observeStickyColumns();
+            window.scrollTo({left: pageScrollX, top: pageScrollY, behavior: 'instant'});
         } catch (error) {
             if (error.name !== 'AbortError') console.warn('Alltips-Aktualisierung fehlgeschlagen:', error);
         } finally {
@@ -691,6 +740,7 @@ title="<?php echo !$visible ? 'Tipps werden erst nach Anpfiff sichtbar' : ($hasT
         if (!document.hidden) refreshAllTips();
     });
     window.addEventListener('resize', updateStickyColumns);
+    window.addEventListener('scroll', updateStickyColumns, {passive: true});
     renderSimulation();
     observeStickyColumns();
     scheduleRefresh();

@@ -18,9 +18,9 @@ h1 { margin: 0 0 20px; font-size: 35.2px; }
 .day-options a:hover, .day-options a[aria-selected="true"] { background: #354139; }
 select, button { font: inherit; border: 1px solid #607268; border-radius: 5px; background: #29322d; padding: 9px 14px; color: #f1f5f2; cursor: pointer; }
 select:hover, button:hover { background: #354139; border-color: #82968a; }
-.print { margin-left: auto; }
+.print { margin-left: 0; }
+.table-actions { display: flex; justify-content: flex-start; margin-top: 10px; }
 .simulation-controls { display: flex; flex-wrap: wrap; gap: 7px; margin-left: auto; }
-.simulation-controls + .print { margin-left: 0; }
 .simulation-controls button { padding: 7px 11px; font-size: 0.9em; }
 .simulation-controls button:disabled { opacity: 0.45; cursor: default; }
 .table-scroll { width: fit-content; max-width: 100%; overflow-x: auto; border: 1px solid #4a5850; border-radius: 5px; overscroll-behavior-x: contain; background: #202723; }
@@ -160,3 +160,12 @@ thead th.day-points.vertical-heading, tbody td.day-points {
     }
 }
 @media print { .scroll-tail { display: none; } }
+
+/* Page space for pulling the whole table up from its heading on small screens. */
+@media screen {
+    .table-scroll { margin-bottom: var(--table-page-lift-space, 0px); }
+}
+
+@media print { .table-actions { display: none; } }
+
+@media screen { .table-scroll { overflow-anchor: none; } }
