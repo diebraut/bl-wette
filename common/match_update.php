@@ -106,6 +106,12 @@ class MatchUpdate
             }
 
             $finalScore = self::finalScore($match);
+            // OpenLigaDB can briefly expose the prepared 0:0 final-result row
+            // as finished while a match is still running.  A Bundesliga match
+            // cannot plausibly be final before 90 minutes plus half-time.
+            if ($finalScore !== null && ($start === null || $now < $start->modify('+105 minutes'))) {
+                $finalScore = null;
+            }
             if ($finalScore !== null) {
                 list($a, $b) = $finalScore;
                 if ((int)$row['intStatus'] !== 2 || (int)$row['intGoal1'] !== $a || (int)$row['intGoal2'] !== $b) {
@@ -184,6 +190,22 @@ class MatchUpdate
         return $next;
     }
 
+    private function restoreRecentlyAdvancedDay(DateTimeImmutable $now)
+    {
+        $currentDay = (int)mysqli_fetch_assoc($this->query('SELECT intDay FROM tblinfo LIMIT 1'))['intDay'];
+        if ($currentDay <= 1) return $currentDay;
+        $previousDay = $currentDay - 1;
+        $state = mysqli_fetch_assoc($this->query("SELECT COUNT(*) AS total,SUM(intStatus<>2) AS unfinished,MIN(dtmStart) AS firstStart,MAX(dtmStart) AS lastStart FROM tblspieltag WHERE intTag=$previousDay"));
+        if ((int)$state['total'] !== 9 || (int)$state['unfinished'] === 0 || empty($state['lastStart'])) return $currentDay;
+        $lastStart = new DateTimeImmutable($state['lastStart'], new DateTimeZone('Europe/Berlin'));
+        if ($lastStart < $now->modify('-8 hours')) return $currentDay;
+
+        $first = mysqli_real_escape_string($this->db, $state['firstStart']);
+        $last = $lastStart->modify('+2 hours')->format('Y-m-d H:i:s');
+        $this->query("UPDATE tblinfo SET intDay=$previousDay,dtmClose='$first',dtmEndOfMatchDay='$last' WHERE intDay=$currentDay");
+        return $previousDay;
+    }
+
     public function run($now = null, $liveOnly = false)
     {
         $lock = 'bl-wette-results-' . DB_NAME;
@@ -194,6 +216,12 @@ class MatchUpdate
             $currentDay = (int)mysqli_fetch_assoc($this->query('SELECT intDay FROM tblinfo LIMIT 1'))['intDay'];
             $dayNumbers = $liveOnly ? [] : [$currentDay => true];
             if (!$liveOnly && $currentDay < (int)CONST_NUMBER_OF_MATCH_DAYS) $dayNumbers[$currentDay + 1] = true;
+            if (!$liveOnly && $currentDay > 1) {
+                $previousDay = $currentDay - 1;
+                $recent = $now->modify('-8 hours')->format('Y-m-d H:i:s');
+                $recentPrevious = mysqli_fetch_assoc($this->query("SELECT COUNT(*) AS total FROM tblspieltag WHERE intTag=$previousDay AND dtmStart>='$recent'"));
+                if ((int)$recentPrevious['total'] > 0) $dayNumbers[$previousDay] = true;
+            }
             $due = $now->format('Y-m-d H:i:s');
             $days = $this->query($liveOnly
                 ? 'SELECT DISTINCT intTag FROM tblspieltag WHERE intStatus=1 ORDER BY intTag'
@@ -226,6 +254,7 @@ class MatchUpdate
             // interrupted update. During ten-second live polling, persistent
             // totals only change after a newly detected final whistle.
             if (!$liveOnly || $stats['finished'] > 0) $this->recalculatePoints();
+            $this->restoreRecentlyAdvancedDay($now);
             return ['updated' => $stats, 'evaluated' => $stats['finished'],
                 'currentDay' => $this->advanceCompletedDay(), 'errors' => $errors];
         } finally {
