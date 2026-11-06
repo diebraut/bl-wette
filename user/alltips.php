@@ -145,7 +145,7 @@ foreach ($players as $player) {
     $livePlayers[] = [$userId, $player['strAlias'], (int)$player['intPoint'],
         $overallRankByUser[$userId], $dayPoints[$userId] ?? 0, $visibleTips];
 }
-$liveVersion = hash('sha256', json_encode([$day, $currentDay, $currentDayStarted, $liveMatches, $livePlayers], JSON_INVALID_UTF8_SUBSTITUTE));
+$liveVersion = hash('sha256', json_encode([$day, $currentDay, $currentDayStarted, $liveMatches, $livePlayers, $upcomingByTeam], JSON_INVALID_UTF8_SUBSTITUTE));
 ?>
 <!doctype html>
 <html lang="de"><head>

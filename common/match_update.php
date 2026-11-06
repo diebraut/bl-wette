@@ -5,8 +5,9 @@ class MatchUpdate
     private $db;
     private $fetch;
     private $fetchSchedule;
+    private $scheduleStamp;
 
-    public function __construct($db, $fetch = null)
+    public function __construct($db, $fetch = null, $fetchSchedule = null, $scheduleStamp = null)
     {
         $this->db = $db;
         $useOpenLigaDb = $fetch === null;
@@ -23,7 +24,7 @@ class MatchUpdate
             }
             return $data;
         };
-        $this->fetchSchedule = $useOpenLigaDb ? function () {
+        $this->fetchSchedule = $fetchSchedule ?: ($useOpenLigaDb ? function () {
             $ch = curl_init('https://api.openligadb.de/getmatchdata/' . CONST_LIGA . '/' . CONST_LIGA_SEASON);
             curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 5,
                 CURLOPT_TIMEOUT => 20, CURLOPT_USERAGENT => 'bl-wette schedule updater']);
@@ -35,7 +36,9 @@ class MatchUpdate
                 throw new RuntimeException('OpenLigaDB: keine gueltigen Saisontermine');
             }
             return $data;
-        } : null;
+        } : null);
+        $this->scheduleStamp = $scheduleStamp ?: sys_get_temp_dir() . '/bl-wette-schedule-'
+            . sha1(HOST . '|' . DB_NAME . '|' . CONST_LIGA . '|' . CONST_LIGA_SEASON) . '.state';
     }
 
     private function query($sql)
@@ -132,26 +135,45 @@ class MatchUpdate
         return $stats;
     }
 
-    private function refreshSeasonSchedule($currentDay)
+    public function refreshSeasonSchedule($currentDay, $dryRun = false)
     {
-        if ($this->fetchSchedule === null) return 0;
+        if ($this->fetchSchedule === null) return [];
         $matches = call_user_func($this->fetchSchedule);
-        $updated = 0;
+        $changes = [];
         foreach ($matches as $match) {
             $day = (int)($match['group']['groupOrderID'] ?? 0);
             $id = (int)($match['matchID'] ?? 0);
-            if ($day < $currentDay || $day > (int)CONST_NUMBER_OF_MATCH_DAYS || $id <= 0) continue;
+            if ($day < 1 || $day > (int)CONST_NUMBER_OF_MATCH_DAYS || $id <= 0) continue;
             $start = self::matchStart($match);
             if ($start === null) continue;
-            $row = mysqli_fetch_assoc($this->query("SELECT lngIndex,dtmStart FROM tblspieltag WHERE intTag=$day AND intMatchIdFromOpenLigaDB=$id"));
+            $row = mysqli_fetch_assoc($this->query("SELECT lngIndex,dtmStart FROM tblspieltag WHERE intTag=$day AND intMatchIdFromOpenLigaDB=$id AND intStatus=0"));
             if (!$row) continue;
             $startSql = $start->format('Y-m-d H:i:s');
             if (($row['dtmStart'] ?? null) === $startSql) continue;
             $pk = (int)$row['lngIndex'];
-            $this->query("UPDATE tblspieltag SET dtmStart='$startSql' WHERE lngIndex=$pk");
-            $updated++;
+            $changes[] = ['matchId' => $id, 'day' => $day, 'old' => $row['dtmStart'],
+                'new' => $startSql, 'home' => $match['team1']['teamName'] ?? '',
+                'away' => $match['team2']['teamName'] ?? ''];
+            if (!$dryRun) $this->query("UPDATE tblspieltag SET dtmStart='$startSql' WHERE lngIndex=$pk AND intStatus=0");
         }
-        return $updated;
+        return $changes;
+    }
+
+    private function refreshSeasonScheduleIfDue($currentDay, DateTimeImmutable $now)
+    {
+        if ($this->fetchSchedule === null) return 0;
+        // Include every completed round, including a postponed older round.
+        // This also detects the final matchday, which does not advance intDay.
+        $completed = [];
+        $days = $this->query('SELECT intTag FROM tblspieltag GROUP BY intTag HAVING COUNT(*)=9 AND SUM(intStatus<>2)=0 ORDER BY intTag');
+        while ($row = mysqli_fetch_assoc($days)) $completed[] = (int)$row['intTag'];
+        $token = $now->format('Y-m-d') . ':' . implode(',', $completed);
+        if (@file_get_contents($this->scheduleStamp) === $token) return 0;
+        $changes = $this->refreshSeasonSchedule($currentDay);
+        // Mark success only after fetching and applying all published changes.
+        if (@file_put_contents($this->scheduleStamp, $token, LOCK_EX) === false)
+            throw new RuntimeException('Saisontermin-Abgleich konnte nicht protokolliert werden');
+        return count($changes);
     }
 
     public function recalculatePoints()
@@ -230,18 +252,6 @@ class MatchUpdate
             ksort($dayNumbers);
             $stats = ['schedule' => 0, 'live' => 0, 'finished' => 0];
             $errors = [];
-            if (!$liveOnly && $this->fetchSchedule !== null) {
-                $scheduleStamp = sys_get_temp_dir() . '/bl-wette-schedule-' . sha1(DB_NAME) . '.date';
-                $today = $now->format('Y-m-d');
-                if (@file_get_contents($scheduleStamp) !== $today) {
-                    try {
-                        $stats['schedule'] += $this->refreshSeasonSchedule($currentDay);
-                        @file_put_contents($scheduleStamp, $today, LOCK_EX);
-                    } catch (Throwable $e) {
-                        $errors[] = $e->getMessage();
-                    }
-                }
-            }
             foreach (array_keys($dayNumbers) as $day) {
                 if ($day < 1 || $day > (int)CONST_NUMBER_OF_MATCH_DAYS) continue;
                 try {
@@ -249,6 +259,11 @@ class MatchUpdate
                     foreach ($stats as $key => $value) $stats[$key] += $dayStats[$key];
                 }
                 catch (Throwable $e) { $errors[] = $e->getMessage(); }
+            }
+            if (!$liveOnly || $stats['finished'] > 0) {
+                try {
+                    $stats['schedule'] += $this->refreshSeasonScheduleIfDue($currentDay, $now);
+                } catch (Throwable $e) { $errors[] = $e->getMessage(); }
             }
             // The regular five-minute run also repairs totals after an earlier
             // interrupted update. During ten-second live polling, persistent

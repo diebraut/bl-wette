@@ -16,6 +16,11 @@ Protokoll: `bl-wette-match-update.log` im PHP-Verzeichnis `sys_get_temp_dir()`.
 - Einmal täglich die veröffentlichten Anstoßtermine der gesamten Saison mit
   einem einzigen OpenLigaDB-Aufruf abgleichen. Dadurch zeigt die Spieltag-Auswahl
   auch bereits terminierte spätere Spieltage korrekt an.
+- Zusätzlich nach jedem vollständig beendeten Spieltag alle noch nicht
+  begonnenen Saisonpartien erneut abgleichen, auch beim Zehn-Sekunden-Livelauf.
+  Das gilt ebenso für nachgeholte ältere Spieltage und den Saisonabschluss.
+  Nur Termine ändern; Ergebnisse, Tipps und Punkte bleiben dabei unverändert.
+  Ein fehlgeschlagener Abgleich wird beim nächsten regulären Lauf wiederholt.
 - Ab dem aktuell gemeldeten Anstoß eine Begegnung als laufend markieren und den
   Zwischenstand aus der OpenLigaDB-Torfolge bzw. dem aktuellen Ergebnis speichern.
 - Solange mindestens eine Begegnung läuft, OpenLigaDB innerhalb desselben
